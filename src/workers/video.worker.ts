@@ -2,66 +2,150 @@
 import "dotenv/config";
 
 import { Worker } from "bullmq";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import path from "node:path";
+import fs from "node:fs/promises";
 
 import { db } from "../db";
-import { processingJobs } from "../db/schema";
-import { QUEUE_NAME } from "../lib/video-queue";
+import { processingJobs, videos } from "../db/schema";
+import {
+  getVideoMetadata,
+  extractClip,
+} from "../media/video";
 
-const worker = new Worker(
-  QUEUE_NAME,
+type VideoJob = {
+  videoId: string;
+  jobId: string;
+};
+
+const worker = new Worker<VideoJob>(
+  "video-processing",
 
   async (job) => {
     const { videoId, jobId } = job.data;
 
-    console.log(`Starting analysis for ${videoId}`);
-
-    // 1. Mark the job as processing.
-    await db
-      .update(processingJobs)
-      .set({
-        status: "processing",
-        errorMessage: null,
-      })
-      .where(
-        and(
-          eq(processingJobs.id, jobId),
-          eq(processingJobs.status, "pending")
-        )
-      );
-
     try {
-      // 2. Simulate video processing.
-      await new Promise((resolve) =>
-        setTimeout(resolve, 5000)
+      // 1. Update the job status.
+      await db
+        .update(processingJobs)
+        .set({
+          status: "processing",
+          errorMessage: null,
+          completedAt: null,
+        })
+        .where(eq(processingJobs.id, jobId));
+
+      console.log(`Processing video: ${videoId}`);
+
+      // 2. Retrieve the video from PostgreSQL.
+      const [video] = await db
+        .select()
+        .from(videos)
+        .where(eq(videos.id, videoId))
+        .limit(1);
+
+      if (!video) {
+        throw new Error("Video not found");
+      }
+
+      // 3. Resolve the local video file.
+      // Restrict this prototype to safe MP4 filenames.
+      const filename = video.storageKey;
+
+      if (!/^[a-zA-Z0-9_-]+\.mp4$/i.test(filename)) {
+        throw new Error("Invalid local video filename");
+      }
+
+      const inputPath = path.join(
+        process.cwd(),
+        "local-videos",
+        filename
       );
 
-      // 3. Mark the job as completed.
+      await fs.access(inputPath);
+
+      // 4. Inspect video with FFprobe.
+      const metadata = await getVideoMetadata(inputPath);
+
+      console.log("Video metadata:", metadata);
+
+      if (
+        !Number.isFinite(metadata.durationSeconds) ||
+        metadata.durationSeconds <= 1
+      ) {
+        throw new Error("Invalid video duration");
+      }
+
+      // 5. Choose a test clip.
+      const start = Math.min(
+        30,
+        metadata.durationSeconds / 2
+      );
+
+      const end = Math.min(
+        start + 15,
+        metadata.durationSeconds
+      );
+
+      // 6. Create output directory.
+      const outputDir = path.join(
+        process.cwd(),
+        "local-clips"
+      );
+
+      await fs.mkdir(outputDir, { recursive: true });
+
+      const outputPath = path.join(
+        outputDir,
+        `${jobId}.mp4`
+      );
+
+      // 7. Extract the clip with FFmpeg.
+      await extractClip(
+        inputPath,
+        outputPath,
+        start,
+        end
+      );
+
+      console.log(`Clip generated: ${outputPath}`);
+
+      // 8. Update PostgreSQL.
       await db
         .update(processingJobs)
         .set({
           status: "completed",
+          errorMessage: null,
           completedAt: new Date(),
         })
         .where(eq(processingJobs.id, jobId));
 
-      console.log(`Finished analysis for ${videoId}`);
-
-      return { videoId, highlightsFound: 5 };
+      return {
+        videoId,
+        outputPath,
+        start,
+        end,
+        metadata,
+      };
 
     } catch (error) {
-      // 4. Persist processing failure.
-      await db
-        .update(processingJobs)
-        .set({
-          status: "failed",
-          errorMessage:
-            error instanceof Error
-              ? error.message
-              : "Unknown processing error",
-          completedAt: new Date(),
-        })
-        .where(eq(processingJobs.id, jobId));
+      console.error(`Processing failed: ${videoId}`, error);
+
+      try {
+        await db
+          .update(processingJobs)
+          .set({
+            status: "failed",
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "Unknown processing error",
+            completedAt: new Date(),
+          })
+          .where(eq(processingJobs.id, jobId));
+      } catch (dbError) {
+        console.error("Failed to save job failure:", dbError);
+      }
 
       throw error;
     }
@@ -81,31 +165,12 @@ worker.on("completed", (job) => {
   console.log(`Job ${job.id} completed`);
 });
 
-worker.on("failed", async (job, error) => {
+worker.on("failed", (job, error) => {
   console.error(`Job ${job?.id} failed:`, error);
-
-  // Covers failures outside the processor's try/catch.
-  if (!job?.data?.jobId) return;
-
-  try {
-    await db
-      .update(processingJobs)
-      .set({
-        status: "failed",
-        errorMessage: error.message,
-        completedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(processingJobs.id, job.data.jobId),
-          eq(processingJobs.status, "processing")
-        )
-      );
-  } catch (dbError) {
-    console.error("Failed to persist job failure:", dbError);
-  }
 });
 
-worker.on("error", console.error);
+worker.on("error", (error) => {
+  console.error("Worker error:", error);
+});
 
-console.log("Trexton AI worker is running...");
+console.log("The Trexton AI video worker has started");
