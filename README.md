@@ -173,8 +173,8 @@ The current job processor simulates video analysis. Actual AI inference and vide
 - [x] Set up Drizzle ORM
 - [x] Define initial database schema
 - [x] Implement BullMQ job submission endpoint
-- [ ] Verify background worker processing end to end
-- [ ] Persist processing job status in PostgreSQL
+- [x] Verify background worker processing end to end
+- [x] Persist processing job status in PostgreSQL
 - [ ] Implement video uploads and object storage
 - [ ] Build audio transcription pipeline
 - [ ] Implement AI highlight detection and ranking
