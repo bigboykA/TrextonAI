@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import {
   getVideoMetadata,
   extractClip,
-} from "./video";
+} from "../video";
 
 async function main() {
   const inputPath = path.join(

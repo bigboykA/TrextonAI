@@ -5,7 +5,7 @@ import { Worker } from "bullmq";
 import { eq } from "drizzle-orm";
 import path from "node:path";
 import fs from "node:fs/promises";
-
+import {extractAudio} from "../media/audio"
 import { db } from "../db";
 import { processingJobs, videos } from "../db/schema";
 import {
@@ -108,7 +108,22 @@ const worker = new Worker<VideoJob>(
         end
       );
 
+
+
       console.log(`Clip generated: ${outputPath}`);
+
+      const audioDir = path.join(
+        process.cwd(),
+        "local-audio"
+      );
+      
+      await fs.mkdir(audioDir, { recursive: true });
+      
+      const audioPath = path.join(audioDir, `${jobId}.wav`);
+      
+      await extractAudio(inputPath, audioPath);
+      
+      console.log(`Audio extracted: ${audioPath}`);
 
       // 8. Update PostgreSQL.
       await db
