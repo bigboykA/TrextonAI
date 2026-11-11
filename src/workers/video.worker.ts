@@ -12,6 +12,11 @@ import {
   getVideoMetadata,
   extractClip,
 } from "../media/video";
+import { transcribeAudio } from "../ai/transcribe";
+
+
+
+
 
 type VideoJob = {
   videoId: string;
@@ -125,6 +130,26 @@ const worker = new Worker<VideoJob>(
       
       console.log(`Audio extracted: ${audioPath}`);
 
+
+      const transcriptDir = path.join(
+        process.cwd(),
+        "local-transcripts"
+      );
+
+      await fs.mkdir(transcriptDir, { recursive: true });
+
+      const transcriptPath = path.join(
+        transcriptDir,
+        `${jobId}.json`
+      );
+
+      console.log(`Starting transcription for job ${jobId}`);
+
+      await transcribeAudio(audioPath, transcriptPath);
+
+      console.log(`Transcript saved: ${transcriptPath}`);
+
+
       // 8. Update PostgreSQL.
       await db
         .update(processingJobs)
@@ -135,13 +160,15 @@ const worker = new Worker<VideoJob>(
         })
         .where(eq(processingJobs.id, jobId));
 
-      return {
-        videoId,
-        outputPath,
-        start,
-        end,
-        metadata,
-      };
+        return {
+          videoId,
+          outputPath,
+          audioPath,
+          transcriptPath,
+          start,
+          end,
+          metadata,
+        };
 
     } catch (error) {
       console.error(`Processing failed: ${videoId}`, error);

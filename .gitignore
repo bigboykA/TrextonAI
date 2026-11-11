@@ -44,3 +44,6 @@ next-env.d.ts
 /local-videos/
 #generated clips
 /local-clips/
+/local-audio/
+/.venv/
+/local-transcripts/
