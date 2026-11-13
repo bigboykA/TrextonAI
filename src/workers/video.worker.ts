@@ -7,12 +7,13 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import {extractAudio} from "../media/audio"
 import { db } from "../db";
-import { processingJobs, videos } from "../db/schema";
+import { generatedClips,processingJobs, videos } from "../db/schema";
 import {
   getVideoMetadata,
   extractClip,
 } from "../media/video";
 import { transcribeAudio } from "../ai/transcribe";
+import { generateHighlights } from "../ai/highlights/generate";
 
 
 
@@ -105,13 +106,7 @@ const worker = new Worker<VideoJob>(
         `${jobId}.mp4`
       );
 
-      // 7. Extract the clip with FFmpeg.
-      await extractClip(
-        inputPath,
-        outputPath,
-        start,
-        end
-      );
+      
 
 
 
@@ -147,6 +142,49 @@ const worker = new Worker<VideoJob>(
 
       await transcribeAudio(audioPath, transcriptPath);
 
+      const highlightsDir = path.join(
+        process.cwd(),
+        "local-clips",
+        jobId
+      );
+
+      const clips = await generateHighlights(
+        inputPath,
+        transcriptPath,
+        highlightsDir,
+        metadata.durationSeconds,
+        3
+      );
+
+
+if (clips.length > 0) {
+  const clipRecords = clips.map((clip, index) => ({
+    videoId,
+    jobId,
+    rank: index + 1,
+    start: clip.start,
+    end: clip.end,
+    score: clip.score,
+    reason: clip.reason,
+    transcriptText: clip.text,
+    storageKey: path.relative(
+      process.cwd(),
+      clip.outputPath
+    ),
+  }));
+
+  await db.insert(generatedClips).values(clipRecords);
+
+  console.log(
+    `Saved ${clipRecords.length} clips to PostgreSQL`
+  );
+}
+
+      
+      console.log(
+        `Generated ${clips.length} highlights for job ${jobId}`
+      );
+
       console.log(`Transcript saved: ${transcriptPath}`);
 
 
@@ -162,11 +200,9 @@ const worker = new Worker<VideoJob>(
 
         return {
           videoId,
-          outputPath,
           audioPath,
           transcriptPath,
-          start,
-          end,
+          clips,
           metadata,
         };
 
