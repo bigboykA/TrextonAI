@@ -175,11 +175,11 @@ The current job processor simulates video analysis. Actual AI inference and vide
 - [x] Implement BullMQ job submission endpoint
 - [x] Verify background worker processing end to end
 - [x] Persist processing job status in PostgreSQL
-- [ ] Implement video uploads and object storage
-- [ ] Build audio transcription pipeline
-- [ ] Implement AI highlight detection and ranking
-- [ ] Generate clips using FFmpeg
-- [ ] Build highlight preview and management dashboard
+- [x] Implement video uploads and object storage
+- [x] Build audio transcription pipeline
+- [x] Implement AI highlight detection and ranking
+- [x] Generate clips using FFmpeg
+- [x] Build highlight preview and management dashboard
 - [ ] Integrate Twitch authentication and supported VOD workflows
 - [ ] Add creator feedback and personalization
 
