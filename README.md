@@ -43,7 +43,7 @@ The initial version of Trexton AI focuses on analyzing completed gaming recordin
 | BullMQ | Asynchronous job queue |
 | Docker | Local infrastructure and container management |
 | FFmpeg  | Video processing and clip extraction |
-| Object Storage (planned) | Video recordings and generated clips |
+| Object Storage  | Video recordings and generated clips |
 | AI Models (planned) | Audio transcription and multimodal highlight analysis |
 
 ## System Architecture
