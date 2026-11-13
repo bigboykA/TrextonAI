@@ -21,7 +21,10 @@ export function SettingsView() {
   const [draftVideoId, setDraftVideoId] = useState<string | null>(
     null
   );
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const videoId = draftVideoId ?? activeVideoId;
 
   function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -29,33 +32,42 @@ export function SettingsView() {
     const normalizedVideoId = videoId.trim();
 
     if (!UUID_PATTERN.test(normalizedVideoId)) {
-      setMessage("Enter a valid video UUID.");
+      setMessage({
+        type: "error",
+        text: "Enter a valid video UUID.",
+      });
       return;
     }
 
     setActiveVideoId(normalizedVideoId);
     setDraftVideoId(null);
-    setMessage("Video source saved.");
+    setMessage({
+      type: "success",
+      text: "Video source saved.",
+    });
   }
 
   function handleDisconnect() {
     setActiveVideoId("");
     setDraftVideoId("");
-    setMessage("Video source disconnected.");
+    setMessage({
+      type: "success",
+      text: "Video source disconnected.",
+    });
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       <PageHeader
         eyebrow="Settings"
-        title="A few things, exactly your way."
-        description="Set the atmosphere and choose which local recording Trexton should hold in view."
+        title="Preferences"
+        description="Appearance and local workspace configuration."
       />
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <section className="rounded-3xl border border-border bg-card p-5 sm:p-7">
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        <section className="grid gap-5 p-5 md:grid-cols-[minmax(13rem,0.45fr)_minmax(0,1fr)] md:items-center">
           <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-2xl bg-muted text-muted-foreground">
+            <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
               <BrandMark className="size-5 text-primary" />
             </div>
             <div>
@@ -67,22 +79,29 @@ export function SettingsView() {
               </p>
             </div>
           </div>
-          <div className="mt-6">
+          <div>
             <ThemeSelector />
           </div>
         </section>
+      </div>
 
-        <section className="rounded-3xl border border-border bg-card p-5 sm:p-7">
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="border-b border-border bg-muted/35 px-5 py-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            Local development
+          </p>
+        </div>
+        <div className="p-5">
           <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-2xl bg-muted text-muted-foreground">
+            <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
               <Database aria-hidden="true" className="size-4.5" />
             </div>
             <div>
               <h2 className="font-semibold tracking-tight">
-                Source recording
+                Active video source
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                The recording held across Home, Clips, and Activity.
+                Temporary UUID selection until media import is available.
               </p>
             </div>
           </div>
@@ -103,15 +122,34 @@ export function SettingsView() {
               }}
               placeholder="00000000-0000-0000-0000-000000000000"
               spellCheck={false}
-              className="mt-2 h-11 w-full rounded-2xl border border-input bg-background px-4 font-mono text-xs outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/55 focus:border-primary/60 focus:ring-3 focus:ring-primary/12"
+              aria-invalid={
+                message?.type === "error" ? true : undefined
+              }
+              aria-describedby={
+                message
+                  ? "settings-video-id-help settings-video-id-message"
+                  : "settings-video-id-help"
+              }
+              className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-xs outline-none transition-[border-color,box-shadow] duration-[var(--motion-feedback)] placeholder:text-muted-foreground/55 focus:border-primary/60 focus:ring-3 focus:ring-primary/12"
             />
+            <p
+              id="settings-video-id-help"
+              className="mt-2 text-xs leading-5 text-muted-foreground"
+            >
+              Use a video UUID already stored in the local database.
+            </p>
 
             {message ? (
               <p
-                role="status"
-                className="mt-2 text-xs text-muted-foreground"
+                id="settings-video-id-message"
+                role={message.type === "error" ? "alert" : "status"}
+                className={
+                  message.type === "error"
+                    ? "mt-2 text-xs text-destructive"
+                    : "mt-2 text-xs text-muted-foreground"
+                }
               >
-                {message}
+                {message.text}
               </p>
             ) : null}
 
@@ -135,23 +173,16 @@ export function SettingsView() {
               ) : null}
             </div>
           </form>
-        </section>
-      </div>
-
-      <section className="flex gap-4 rounded-3xl border border-border/70 bg-muted/45 p-5 sm:p-6">
-        <LockKeyhole
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-muted-foreground"
-        />
-        <div>
-          <h2 className="text-sm font-semibold">
-            Local development notice
-          </h2>
-          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Media access is still local and unauthenticated. Keep this
-            preview private until account ownership and route protection
-            are in place.
-          </p>
+          <div className="mt-5 flex gap-3 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
+            <LockKeyhole
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <p>
+              Media routes are local and unauthenticated. Keep this
+              workspace private until account ownership is connected.
+            </p>
+          </div>
         </div>
       </section>
     </div>

@@ -15,13 +15,12 @@ import {
   useEffect,
   useState,
 } from "react";
-import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { LoaderOne } from "@/components/ui/loader";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useWorkspace } from "@/components/providers/workspace-provider";
 import type { ProcessingJob } from "@/lib/frontend-types";
-import { truncateIdentifier } from "@/lib/format";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -29,18 +28,14 @@ const UUID_PATTERN =
 export function ProcessingView() {
   const {
     activeVideoId,
-    setActiveVideoId,
     activeJobId,
     setActiveJobId,
   } = useWorkspace();
-  const [draftVideoId, setDraftVideoId] = useState<string | null>(
-    null
-  );
   const [job, setJob] = useState<ProcessingJob | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const shouldReduceMotion = useReducedMotion();
-  const videoId = draftVideoId ?? activeVideoId;
+  const sourceReady = UUID_PATTERN.test(activeVideoId);
 
   const loadJob = useCallback(async () => {
     if (!activeJobId) {
@@ -63,9 +58,9 @@ export function ProcessingView() {
 
       const nextJob = (await response.json()) as ProcessingJob;
       setJob(nextJob);
-      setError(null);
+      setStatusError(null);
     } catch (loadError) {
-      setError(
+      setStatusError(
         loadError instanceof Error
           ? loadError.message
           : "Could not retrieve processing status"
@@ -92,15 +87,17 @@ export function ProcessingView() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const normalizedVideoId = videoId.trim();
 
-    if (!UUID_PATTERN.test(normalizedVideoId)) {
-      setError("Enter a valid video UUID before processing.");
+    if (!sourceReady) {
+      setSubmitError(
+        "Choose a valid local source in Settings before processing."
+      );
       return;
     }
 
     setIsSubmitting(true);
-    setError(null);
+    setSubmitError(null);
+    setStatusError(null);
     setJob(null);
 
     try {
@@ -109,7 +106,7 @@ export function ProcessingView() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ videoId: normalizedVideoId }),
+        body: JSON.stringify({ videoId: activeVideoId }),
       });
 
       const result = (await response.json()) as {
@@ -123,19 +120,17 @@ export function ProcessingView() {
         );
       }
 
-      setActiveVideoId(normalizedVideoId);
       setActiveJobId(result.jobId);
-      setDraftVideoId(null);
       setJob({
         id: result.jobId,
-        videoId: normalizedVideoId,
+        videoId: activeVideoId,
         status: "pending",
         errorMessage: null,
         createdAt: new Date().toISOString(),
         completedAt: null,
       });
     } catch (submitError) {
-      setError(
+      setSubmitError(
         submitError instanceof Error
           ? submitError.message
           : "Could not start video processing"
@@ -151,58 +146,70 @@ export function ProcessingView() {
     job?.status === "processing";
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       <PageHeader
         eyebrow="Activity"
-        title="Set the work in motion. Come back to the cut."
-        description="Choose a recording already known to this local workspace. Trexton handles the long listen, then returns with a short list worth your attention."
+        title="Processing"
+        description="Start a run and follow its current state."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(21rem,0.85fr)]">
-        <section className="rounded-3xl border border-border bg-card p-5 shadow-sm sm:p-7">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]">
+        <section className="rounded-xl border border-border bg-card p-5">
           <div className="flex items-start gap-4">
-            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
               <Clapperboard
                 aria-hidden="true"
                 className="size-5"
               />
             </div>
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">
-                Choose the recording
+              <h2 className="text-sm font-semibold tracking-tight">
+                Source recording
               </h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Enter the UUID of a video already stored in PostgreSQL.
+                Use the recording connected to this local workspace.
               </p>
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-8">
-            <label
-              htmlFor="video-id"
-              className="text-sm font-medium"
+          <form
+            onSubmit={handleSubmit}
+            aria-describedby={
+              submitError
+                ? "processing-help processing-error"
+                : "processing-help"
+            }
+            className="mt-6"
+          >
+            <div className="flex items-center justify-between gap-4 border-y border-border py-4">
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Selected source
+                </p>
+                <p className="mt-1 text-sm font-medium">
+                  {sourceReady
+                    ? "Recording ready"
+                    : "No recording selected"}
+                </p>
+              </div>
+              <Link
+                href="/settings"
+                className="inline-flex h-11 items-center rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:h-8"
+              >
+                {sourceReady ? "Change source" : "Choose source"}
+              </Link>
+            </div>
+            <p
+              id="processing-help"
+              className="mt-3 text-xs leading-5 text-muted-foreground"
             >
-              Video ID
-            </label>
-            <input
-              id="video-id"
-              name="videoId"
-              value={videoId}
-              onChange={(event) =>
-                setDraftVideoId(event.target.value)
-              }
-              placeholder="00000000-0000-0000-0000-000000000000"
-              spellCheck={false}
-              autoComplete="off"
-              className="mt-2 h-12 w-full rounded-2xl border border-input bg-background px-4 font-mono text-sm tracking-tight shadow-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/55 focus:border-primary/60 focus:ring-3 focus:ring-primary/12"
-            />
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
               Trexton will listen through the recording, preserve context,
               and return up to three considered cuts.
             </p>
 
-            {error ? (
+            {submitError ? (
               <div
+                id="processing-error"
                 role="alert"
                 className="mt-5 flex items-start gap-2.5 rounded-2xl bg-destructive/8 px-4 py-3 text-sm text-destructive"
               >
@@ -210,15 +217,15 @@ export function ProcessingView() {
                   aria-hidden="true"
                   className="mt-0.5 size-4 shrink-0"
                 />
-                {error}
+                {submitError}
               </div>
             ) : null}
 
             <Button
               type="submit"
               size="lg"
-              disabled={isActive || !videoId.trim()}
-              className="mt-6 h-11 rounded-full px-5"
+              disabled={isActive || !sourceReady}
+              className="mt-5 h-11 rounded-lg px-4 sm:h-9"
             >
               {isActive ? (
                 <LoaderCircle
@@ -239,31 +246,18 @@ export function ProcessingView() {
 
         <section
           aria-live="polite"
-          className="relative overflow-hidden rounded-3xl border border-border bg-[linear-gradient(145deg,var(--card),color-mix(in_oklch,var(--card),var(--primary)_4%))] p-5 sm:p-7"
+          aria-busy={isActive}
+          className="relative overflow-hidden rounded-xl border border-border bg-card p-5"
         >
-          {isActive ? (
-            <motion.div
-              aria-hidden="true"
-              className="absolute inset-x-0 top-0 h-0.5 bg-primary"
-              initial={shouldReduceMotion ? false : { x: "-100%" }}
-              animate={shouldReduceMotion ? undefined : { x: "100%" }}
-              transition={{
-                duration: 1.8,
-                repeat: Infinity,
-                ease: "easeInOut",
-              }}
-            />
-          ) : null}
-
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            <p className="text-xs font-medium text-muted-foreground">
               Current activity
             </p>
             {job ? <StatusPill status={job.status} /> : null}
           </div>
 
           {!activeJobId && !job ? (
-            <div className="mt-14">
+            <div className="mt-10">
               <CircleDashed
                 aria-hidden="true"
                 className="size-8 text-muted-foreground/60"
@@ -276,8 +270,21 @@ export function ProcessingView() {
                 the thread while Trexton works.
               </p>
             </div>
+          ) : statusError ? (
+            <div className="mt-10">
+              <TriangleAlert
+                aria-hidden="true"
+                className="size-8 text-destructive"
+              />
+              <h2 className="mt-5 text-lg font-semibold tracking-tight">
+                Status unavailable
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                {statusError}
+              </p>
+            </div>
           ) : job?.status === "completed" ? (
-            <div className="mt-14">
+            <div className="mt-10">
               <CheckCircle2
                 aria-hidden="true"
                 className="size-8 text-success"
@@ -287,11 +294,11 @@ export function ProcessingView() {
               </h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 The recording has been reviewed and its finished cuts are
-                waiting in Clips.
+                waiting in the Library.
               </p>
               <Link
                 href="/library"
-                className="mt-6 inline-flex h-10 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium shadow-sm transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none"
+                className="mt-6 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium shadow-sm transition-transform duration-[var(--motion-feedback)] hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none sm:h-10"
               >
                 Review the cuts
                 <ArrowRight
@@ -301,7 +308,7 @@ export function ProcessingView() {
               </Link>
             </div>
           ) : job?.status === "failed" ? (
-            <div className="mt-14">
+            <div className="mt-10">
               <TriangleAlert
                 aria-hidden="true"
                 className="size-8 text-destructive"
@@ -315,11 +322,10 @@ export function ProcessingView() {
               </p>
             </div>
           ) : (
-            <div className="mt-14">
-              <LoaderCircle
-                aria-hidden="true"
-                className="size-8 animate-spin text-primary motion-reduce:animate-none"
-              />
+            <div className="mt-10">
+              <div className="h-8 text-primary">
+                <LoaderOne />
+              </div>
               <h2 className="mt-5 text-lg font-semibold tracking-tight">
                 {job?.status === "processing"
                   ? "Listening for what holds up"
@@ -332,11 +338,6 @@ export function ProcessingView() {
             </div>
           )}
 
-          {activeJobId ? (
-            <p className="mt-10 border-t border-border/70 pt-4 font-mono text-[0.68rem] text-muted-foreground">
-              Job {truncateIdentifier(activeJobId)}
-            </p>
-          ) : null}
         </section>
       </div>
     </div>

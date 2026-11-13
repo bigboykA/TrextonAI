@@ -1,24 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   CircleDotDashed,
   Clapperboard,
   House,
-  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
   Settings,
-  X,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { FormEvent, useState } from "react";
 import { BrandWordmark } from "@/components/brand/brand-mark";
-import { AmbientBackground } from "@/components/effects/ambient-background";
+import { useWorkspace } from "@/components/providers/workspace-provider";
+import {
+  motionTransitions,
+  reducedMotionTransition,
+} from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { href: "/", label: "Home", icon: House },
-  { href: "/library", label: "Clips", icon: Clapperboard },
+  { href: "/library", label: "Library", icon: Clapperboard },
   {
     href: "/processing",
     label: "Activity",
@@ -27,14 +33,14 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
-function Wordmark() {
+function Wordmark({ compact = false }: { compact?: boolean }) {
   return (
     <Link
       href="/"
-      className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+      className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 md:min-h-8"
       aria-label="Trexton home"
     >
-      <BrandWordmark />
+      <BrandWordmark compact={compact} />
     </Link>
   );
 }
@@ -44,10 +50,14 @@ function NavigationLink({
   label,
   icon: Icon,
   pathname,
-  onNavigate,
+  collapsed = false,
+  mobile = false,
+  reduceMotion = false,
 }: (typeof navigation)[number] & {
   pathname: string;
-  onNavigate?: () => void;
+  collapsed?: boolean;
+  mobile?: boolean;
+  reduceMotion?: boolean | null;
 }) {
   const isActive =
     href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -55,27 +65,44 @@ function NavigationLink({
   return (
     <Link
       href={href}
-      onClick={onNavigate}
       aria-current={isActive ? "page" : undefined}
+      title={collapsed ? label : undefined}
       className={cn(
-        "relative flex h-10 items-center gap-3 rounded-xl px-3.5 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
+        "relative flex items-center text-sm font-medium transition-colors duration-[var(--motion-feedback)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
+        mobile
+          ? "h-13 flex-1 flex-col justify-center gap-1 rounded-lg px-1 text-[0.7rem]"
+          : "h-9 gap-3 rounded-lg px-3",
+        collapsed && !mobile && "justify-center px-0",
         isActive
-          ? "bg-primary/[0.09] text-primary shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--primary),transparent_84%)]"
-          : "text-muted-foreground hover:translate-x-0.5 hover:bg-muted/75 hover:text-foreground motion-reduce:transform-none"
+          ? "text-primary"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
       )}
     >
       {isActive ? (
-        <span
+        <motion.span
+          layoutId={mobile ? "mobile-nav-active" : "desktop-nav-active"}
           aria-hidden="true"
-          className="absolute left-1.5 size-1.5 rotate-45 rounded-[2px] bg-primary"
+          className={cn(
+            "absolute bg-primary/[0.1]",
+            mobile
+              ? "inset-x-1 top-1 h-8 rounded-lg"
+              : "inset-0 rounded-lg"
+          )}
+          transition={
+            reduceMotion
+              ? reducedMotionTransition
+              : motionTransitions.navigation
+          }
         />
       ) : null}
       <Icon
         aria-hidden="true"
         strokeWidth={1.8}
-        className="size-[1.05rem]"
+        className="relative z-10 size-4"
       />
-      {label}
+      {!collapsed || mobile ? (
+        <span className="relative z-10">{label}</span>
+      ) : null}
     </Link>
   );
 }
@@ -86,106 +113,182 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const shouldReduceMotion = useReducedMotion();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const { librarySearch, setLibrarySearch } = useWorkspace();
+
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    router.push("/library");
+  }
 
   return (
     <div className="min-h-dvh bg-background">
-      <AmbientBackground />
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-sidebar-border bg-sidebar/95 px-4 py-5 backdrop-blur-xl md:flex md:flex-col">
-        <div className="px-2">
-          <Wordmark />
-          <p className="mt-2 pl-[2.65rem] text-[0.68rem] tracking-wide text-muted-foreground">
-            Clips, considered.
-          </p>
+      <a
+        href="#main-content"
+        className="pointer-events-none fixed left-4 top-4 z-100 -translate-y-20 rounded-lg bg-background px-3 py-2 text-sm font-medium opacity-0 shadow-lg transition-[transform,opacity] duration-[var(--motion-feedback)] focus:pointer-events-auto focus:translate-y-0 focus:opacity-100 focus:outline-none focus:ring-3 focus:ring-ring/40 motion-reduce:transition-none"
+      >
+        Skip to content
+      </a>
+
+      <motion.aside
+        layout
+        transition={
+          shouldReduceMotion
+            ? reducedMotionTransition
+            : motionTransitions.layout
+        }
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar px-3 py-4 md:flex md:flex-col",
+          isCollapsed ? "w-[72px]" : "w-[212px]"
+        )}
+      >
+        <div
+          className={cn(
+            "flex h-9 items-center",
+            isCollapsed ? "justify-center" : "px-1"
+          )}
+        >
+          <Wordmark compact={isCollapsed} />
         </div>
 
         <nav
           aria-label="Primary navigation"
-          className="mt-9 space-y-1"
+          className="mt-7 space-y-1"
         >
           {navigation.map((item) => (
             <NavigationLink
               key={item.href}
               {...item}
               pathname={pathname}
+              collapsed={isCollapsed}
+              reduceMotion={shouldReduceMotion}
             />
           ))}
         </nav>
 
-        <div className="mt-auto rounded-2xl border border-border/70 bg-background/50 p-3.5">
-          <div className="mb-2 flex items-center gap-2">
-            <span
-              aria-hidden="true"
-              className="size-1.5 rounded-full bg-success shadow-[0_0_0_3px_color-mix(in_oklch,var(--success),transparent_85%)]"
-            />
-            <p className="text-xs font-medium">Local workspace</p>
-          </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Private preview. Authentication is not connected yet.
-          </p>
-        </div>
-      </aside>
-
-      <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-border/70 bg-background/85 px-5 backdrop-blur-xl md:hidden">
-        <Wordmark />
         <button
           type="button"
-          onClick={() => setIsMenuOpen((open) => !open)}
-          aria-expanded={isMenuOpen}
-          aria-controls="mobile-navigation"
-          aria-label={isMenuOpen ? "Close menu" : "Open menu"}
-          className="grid size-9 place-items-center rounded-full border border-border bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+          onClick={() => setIsCollapsed((value) => !value)}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "mt-auto flex h-9 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
+            isCollapsed && "justify-center px-0"
+          )}
         >
-          {isMenuOpen ? (
-            <X aria-hidden="true" className="size-4" />
+          {isCollapsed ? (
+            <PanelLeftOpen aria-hidden="true" className="size-4" />
           ) : (
-            <Menu aria-hidden="true" className="size-4" />
+            <>
+              <PanelLeftClose aria-hidden="true" className="size-4" />
+              <span>Collapse</span>
+            </>
           )}
         </button>
+      </motion.aside>
+
+      <motion.div
+        layout="position"
+        transition={
+          shouldReduceMotion
+            ? reducedMotionTransition
+            : motionTransitions.layout
+        }
+        className={cn(
+          "hidden md:block",
+          isCollapsed ? "md:ml-[72px]" : "md:ml-[212px]"
+        )}
+      >
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-border/75 bg-background/90 px-5 backdrop-blur-xl">
+          <form
+            onSubmit={handleSearch}
+            className="relative w-full max-w-md"
+          >
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              value={librarySearch}
+              onChange={(event) => setLibrarySearch(event.target.value)}
+              aria-label="Search clips"
+              placeholder="Search clips"
+              className="h-8 w-full rounded-lg border border-transparent bg-muted/70 pl-9 pr-3 text-sm outline-none transition-colors duration-[var(--motion-feedback)] placeholder:text-muted-foreground focus:border-border focus:bg-background focus:ring-3 focus:ring-ring/15"
+            />
+          </form>
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/processing"
+              className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+            >
+              <CircleDotDashed aria-hidden="true" className="size-3.5" />
+              Activity
+            </Link>
+            <Link
+              href="/processing"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm transition-transform duration-[var(--motion-feedback)] hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none"
+            >
+              <Plus aria-hidden="true" className="size-3.5" />
+              New
+            </Link>
+          </div>
+        </header>
+      </motion.div>
+
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border/75 bg-background/90 px-4 backdrop-blur-xl md:hidden">
+        <Wordmark />
+        <div className="flex items-center gap-1">
+          <Link
+            href="/library"
+            aria-label="Search clips"
+            className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+          >
+            <Search aria-hidden="true" className="size-4" />
+          </Link>
+          <Link
+            href="/processing"
+            aria-label="Start new activity"
+            className="grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+          >
+            <Plus aria-hidden="true" className="size-4" />
+          </Link>
+        </div>
       </header>
 
-      <AnimatePresence>
-        {isMenuOpen ? (
-          <motion.div
-            id="mobile-navigation"
-            initial={
-              shouldReduceMotion
-                ? false
-                : { opacity: 0, y: -8 }
-            }
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
-            className="fixed inset-x-3 top-[4.5rem] z-50 rounded-2xl border border-border bg-popover p-2 shadow-2xl shadow-foreground/10 md:hidden"
-          >
-            <nav aria-label="Mobile navigation" className="space-y-1">
-              {navigation.map((item) => (
-                <NavigationLink
-                  key={item.href}
-                  {...item}
-                  pathname={pathname}
-                  onNavigate={() => setIsMenuOpen(false)}
-                />
-              ))}
-            </nav>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
-      <main className="relative z-10 md:pl-60">
-        <motion.div
-          key={pathname}
-          initial={
-            shouldReduceMotion ? false : { opacity: 0, y: 5 }
-          }
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, ease: "easeOut" }}
-          className="mx-auto min-h-dvh w-full max-w-[92rem] px-5 py-8 sm:px-8 sm:py-10 lg:px-12 lg:py-12"
-        >
+      <motion.main
+        id="main-content"
+        tabIndex={-1}
+        layout="position"
+        transition={
+          shouldReduceMotion
+            ? reducedMotionTransition
+            : motionTransitions.layout
+        }
+        className={cn(
+          "relative scroll-mt-16 pb-18 outline-none md:pb-0",
+          isCollapsed ? "md:ml-[72px]" : "md:ml-[212px]"
+        )}
+      >
+        <div className="mx-auto min-h-[calc(100dvh-3.5rem)] w-full max-w-[96rem] px-4 py-6 sm:px-6 md:px-8 md:py-7">
           {children}
-        </motion.div>
-      </main>
+        </div>
+      </motion.main>
+
+      <nav
+        aria-label="Mobile navigation"
+        className="fixed inset-x-0 bottom-0 z-40 flex h-16 border-t border-border bg-background/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+      >
+        {navigation.map((item) => (
+          <NavigationLink
+            key={item.href}
+            {...item}
+            pathname={pathname}
+            mobile
+            reduceMotion={shouldReduceMotion}
+          />
+        ))}
+      </nav>
     </div>
   );
 }

@@ -67,6 +67,9 @@
   --preview-from: oklch(0.26 0.036 184);
   --preview-to: oklch(0.13 0.014 184);
   --brand-mark-ink: oklch(0.985 0.006 85);
+  --motion-feedback: 160ms;
+  --motion-navigation: 220ms;
+  --motion-view: 320ms;
 }
 
 .dark {
@@ -106,6 +109,7 @@
   html {
     @apply bg-background font-sans;
     scrollbar-gutter: stable;
+    scroll-padding-top: 4rem;
   }
 
   body {

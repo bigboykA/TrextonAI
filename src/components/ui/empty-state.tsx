@@ -40,7 +40,7 @@ export function EmptyState({
       {action ? (
         <Link
           href={action.href}
-          className="mt-6 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none"
+          className="mt-6 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-transform duration-[var(--motion-feedback)] hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none sm:h-10"
         >
           {action.label}
           <ArrowUpRight aria-hidden="true" className="size-4" />

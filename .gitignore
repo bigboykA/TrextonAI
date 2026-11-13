@@ -47,3 +47,8 @@ next-env.d.ts
 /local-audio/
 /.venv/
 /local-transcripts/
+
+
+
+.agents/
+skills-lock.json

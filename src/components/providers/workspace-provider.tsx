@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useState,
   useSyncExternalStore,
 } from "react";
 
@@ -17,6 +18,8 @@ type WorkspaceContextValue = {
   setActiveVideoId: (value: string) => void;
   activeJobId: string;
   setActiveJobId: (value: string) => void;
+  librarySearch: string;
+  setLibrarySearch: (value: string) => void;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(
@@ -66,6 +69,7 @@ export function WorkspaceProvider({
   const [activeVideoId, setActiveVideoId] =
     useStoredValue(VIDEO_KEY);
   const [activeJobId, setActiveJobId] = useStoredValue(JOB_KEY);
+  const [librarySearch, setLibrarySearch] = useState("");
 
   const value = useMemo(
     () => ({
@@ -73,10 +77,13 @@ export function WorkspaceProvider({
       setActiveVideoId,
       activeJobId,
       setActiveJobId,
+      librarySearch,
+      setLibrarySearch,
     }),
     [
       activeJobId,
       activeVideoId,
+      librarySearch,
       setActiveJobId,
       setActiveVideoId,
     ]

@@ -12,19 +12,15 @@ export function PageHeader({
   action,
 }: PageHeaderProps) {
   return (
-    <header className="flex flex-col gap-5 border-b border-border/65 pb-8 sm:flex-row sm:items-end sm:justify-between">
+    <header className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <p className="mb-3 inline-flex items-center gap-2 text-[0.68rem] font-semibold uppercase tracking-[0.2em] text-primary">
-          <span
-            aria-hidden="true"
-            className="size-1.5 rotate-45 rounded-[2px] bg-primary"
-          />
+        <p className="mb-1.5 text-xs font-medium text-primary">
           {eyebrow}
         </p>
-        <h1 className="max-w-3xl text-3xl font-semibold leading-[1.06] tracking-[-0.045em] text-balance sm:text-[2.65rem]">
+        <h1 className="max-w-3xl text-2xl font-semibold leading-tight tracking-[-0.035em] text-balance">
           {title}
         </h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+        <p className="mt-1.5 max-w-2xl text-sm leading-5 text-muted-foreground">
           {description}
         </p>
       </div>

@@ -40,7 +40,7 @@ export function ThemeSelector() {
 
   return (
     <div
-      className="grid gap-3 sm:grid-cols-3"
+      className="grid gap-1 rounded-lg bg-muted/70 p-1 sm:grid-cols-3"
       aria-label="Appearance"
     >
       {options.map((option) => {
@@ -55,26 +55,28 @@ export function ThemeSelector() {
             aria-pressed={isSelected}
             onClick={() => setTheme(option.value)}
             className={cn(
-              "group flex min-h-28 flex-col items-start rounded-2xl border p-4 text-left transition-all focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
+              "group flex min-h-14 items-center gap-3 rounded-md px-3 text-left transition-colors duration-[var(--motion-feedback)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
               isSelected
-                ? "border-primary/50 bg-primary/6 shadow-[0_1px_0_0_color-mix(in_oklch,var(--primary),transparent_78%)]"
-                : "border-border bg-card hover:-translate-y-0.5 hover:border-foreground/20 motion-reduce:transform-none"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-background/55 hover:text-foreground"
             )}
           >
             <Icon
               aria-hidden="true"
               className={cn(
-                "mb-auto size-5",
+                "size-4 shrink-0",
                 isSelected
                   ? "text-primary"
                   : "text-muted-foreground"
               )}
             />
-            <span className="mt-5 text-sm font-semibold">
-              {option.label}
-            </span>
-            <span className="mt-0.5 text-xs text-muted-foreground">
-              {option.description}
+            <span>
+              <span className="block text-xs font-semibold">
+                {option.label}
+              </span>
+              <span className="mt-0.5 block text-[0.7rem] text-muted-foreground">
+                {option.description}
+              </span>
             </span>
           </button>
         );
