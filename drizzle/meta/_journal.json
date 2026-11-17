@@ -29,6 +29,13 @@
       "when": 1794629436835,
       "tag": "0003_upload_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794892533742,
+      "tag": "0004_r2_processing_integration",
+      "breakpoints": true
     }
   ]
 }

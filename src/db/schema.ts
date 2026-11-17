@@ -12,6 +12,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // PROCESSING STATUS
 export const processingStatus = pgEnum("processing_status", [
@@ -68,56 +69,75 @@ export const videos = pgTable("videos", {
 });
 
 // PROCESSING JOBS
-export const processingJobs = pgTable("processing_jobs", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const processingJobs = pgTable(
+  "processing_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
 
-  videoId: uuid("video_id")
-    .notNull()
-    .references(() => videos.id),
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => videos.id),
 
-  status: processingStatus("status")
-    .default("pending")
-    .notNull(),
+    status: processingStatus("status")
+      .default("pending")
+      .notNull(),
 
-  errorMessage: text("error_message"),
+    errorMessage: text("error_message"),
 
-  createdAt: timestamp("created_at")
-    .defaultNow()
-    .notNull(),
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
 
-  completedAt: timestamp("completed_at"),
-});
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    uniqueIndex("processing_jobs_active_video_uidx")
+      .on(table.videoId)
+      .where(
+        sql`${table.status} in ('pending', 'processing')`
+      ),
+  ]
+);
 
 // GENERATED CLIPS
-export const generatedClips = pgTable("generated_clips", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const generatedClips = pgTable(
+  "generated_clips",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
 
-  videoId: uuid("video_id")
-    .notNull()
-    .references(() => videos.id),
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => videos.id),
 
-  jobId: uuid("job_id")
-    .notNull()
-    .references(() => processingJobs.id),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => processingJobs.id),
 
-  rank: integer("rank").notNull(),
+    rank: integer("rank").notNull(),
 
-  start: doublePrecision("start").notNull(),
+    start: doublePrecision("start").notNull(),
 
-  end: doublePrecision("end").notNull(),
+    end: doublePrecision("end").notNull(),
 
-  score: integer("score").notNull(),
+    score: integer("score").notNull(),
 
-  reason: text("reason").notNull(),
+    reason: text("reason").notNull(),
 
-  transcriptText: text("transcript_text"),
+    transcriptText: text("transcript_text"),
 
-  storageKey: text("storage_key").notNull(),
+    storageKey: text("storage_key").notNull(),
 
-  createdAt: timestamp("created_at")
-    .defaultNow()
-    .notNull(),
-});
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("generated_clips_job_rank_uidx").on(
+      table.jobId,
+      table.rank
+    ),
+  ]
+);
 
 // MULTIPART UPLOAD SESSIONS
 // Durable browser→R2 multipart state. Videos remain the
@@ -172,7 +192,9 @@ export const uploadSessions = pgTable(
     uniqueIndex("upload_sessions_resume_token_uidx").on(
       table.resumeToken
     ),
-    index("upload_sessions_video_id_idx").on(table.videoId),
+    uniqueIndex("upload_sessions_video_id_uidx").on(
+      table.videoId
+    ),
     index("upload_sessions_status_idx").on(table.status),
   ]
 );

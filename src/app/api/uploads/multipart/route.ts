@@ -13,6 +13,10 @@ import { db } from "@/db";
 import { uploadSessions } from "@/db/schema";
 import { getR2Client, getR2Bucket } from "@/lib/storage/r2";
 import {
+  getDevelopmentUploadUserId,
+  registerCompletedUpload,
+} from "@/lib/storage/register-upload";
+import {
   abortRemoteUpload,
   getAuthorizedSession,
   listAllParts,
@@ -121,6 +125,7 @@ export async function POST(request: Request) {
 
       const videoId = randomUUID();
       const resumeToken = randomUUID();
+      const userId = await getDevelopmentUploadUserId();
       const key = uploadObjectKey(videoId);
       const partCount = Math.ceil(fileSize / PART_SIZE);
 
@@ -140,6 +145,7 @@ export async function POST(request: Request) {
         const [session] = await db
           .insert(uploadSessions)
           .values({
+            userId,
             videoId,
             resumeToken,
             r2UploadId: created.UploadId,
@@ -197,6 +203,8 @@ export async function POST(request: Request) {
       }
 
       if (session.status === "completed") {
+        await registerCompletedUpload(session);
+
         return NextResponse.json({
           ...sessionPayload(session),
           parts: [],
@@ -305,6 +313,8 @@ export async function POST(request: Request) {
 
     if (body.action === "complete") {
       if (session.status === "completed") {
+        await registerCompletedUpload(session);
+
         return NextResponse.json({
           success: true,
           sessionId: session.id,
@@ -418,16 +428,7 @@ export async function POST(request: Request) {
           throw new Error("Completed object size mismatch");
         }
 
-        const now = new Date();
-
-        await db
-          .update(uploadSessions)
-          .set({
-            status: "completed",
-            updatedAt: now,
-            completedAt: now,
-          })
-          .where(eq(uploadSessions.id, session.id));
+        await registerCompletedUpload(session);
 
         return NextResponse.json({
           success: true,
@@ -451,16 +452,7 @@ export async function POST(request: Request) {
             );
 
             if (object.ContentLength === session.fileSize) {
-              const now = new Date();
-
-              await db
-                .update(uploadSessions)
-                .set({
-                  status: "completed",
-                  updatedAt: now,
-                  completedAt: now,
-                })
-                .where(eq(uploadSessions.id, session.id));
+              await registerCompletedUpload(session);
 
               return NextResponse.json({
                 success: true,

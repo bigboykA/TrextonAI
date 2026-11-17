@@ -112,6 +112,12 @@ Create a `.env.local` file:
 ```env
 DATABASE_URL=postgresql://trexton:trexton_dev@localhost:5432/trexton
 REDIS_URL=redis://localhost:6379
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=your-r2-access-key-id
+R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
+R2_BUCKET_NAME=trexton-media
+# Required only when the database contains multiple users:
+# DEV_UPLOAD_USER_ID=00000000-0000-4000-8000-000000000000
 ```
 
 These values are intended for local development only.
@@ -127,7 +133,7 @@ This starts the PostgreSQL and Redis containers.
 ### 5. Run database migrations
 
 ```bash
-npx drizzle-kit migrate
+npm run db:migrate
 ```
 
 ### 6. Start the application
@@ -143,8 +149,21 @@ The application will be available at `http://localhost:3000`.
 In a separate terminal:
 
 ```bash
-npx tsx src/workers/video.worker.ts
+npm run worker
 ```
+
+The worker streams completed recordings from private R2 storage
+into an isolated operating-system temporary directory. Generated
+clips are uploaded to deterministic private keys under
+`clips/{videoId}/{jobId}/`. Temporary workspaces are removed in a
+`finally` block; workspaces older than 24 hours are also removed when
+the worker starts because abrupt process termination cannot run
+JavaScript cleanup.
+
+Legacy video rows remain supported. A storage key of
+`local:filename.mp4` explicitly resolves from `local-videos/`;
+pre-existing bare `filename.mp4` values are treated the same way.
+New uploads always use R2 object keys.
 
 ### 8. Submit a test processing job
 
@@ -164,7 +183,9 @@ Expected response:
 }
 ```
 
-The current job processor simulates video analysis. Actual AI inference and video generation are not implemented yet.
+The endpoint accepts only registered videos. R2-backed recordings
+must have a completed upload session. Repeated requests return the
+existing pending/processing job rather than enqueueing duplicates.
 
 ## Development Roadmap
 

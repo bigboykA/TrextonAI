@@ -1,2 +1,4 @@
 
-export { POST, runtime } from "@/app/api/uploads/multipart/route";
+export const runtime = "nodejs";
+
+export { POST } from "@/app/api/uploads/multipart/route";

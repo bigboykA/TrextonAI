@@ -1,8 +1,12 @@
 
 import { db } from "@/db";
-import { processingJobs, videos } from "@/db/schema";
+import {
+  processingJobs,
+  uploadSessions,
+  videos,
+} from "@/db/schema";
 import { videoQueue } from "@/lib/video-queue";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -10,6 +14,13 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request) {
+  if (process.env.NODE_ENV !== "development") {
+    return Response.json(
+      { error: "Unavailable" },
+      { status: 403 }
+    );
+  }
+
   try {
     const body = await request.json();
     const videoId =
@@ -23,7 +34,10 @@ export async function POST(request: Request) {
     }
 
     const [video] = await db
-      .select({ id: videos.id })
+      .select({
+        id: videos.id,
+        storageKey: videos.storageKey,
+      })
       .from(videos)
       .where(eq(videos.id, videoId))
       .limit(1);
@@ -35,10 +49,101 @@ export async function POST(request: Request) {
       );
     }
 
-    const [processingJob] = await db
-      .insert(processingJobs)
-      .values({ videoId })
-      .returning({ id: processingJobs.id });
+    if (video.storageKey.startsWith("originals/")) {
+      const [completedUpload] = await db
+        .select({ id: uploadSessions.id })
+        .from(uploadSessions)
+        .where(
+          and(
+            eq(uploadSessions.videoId, videoId),
+            eq(
+              uploadSessions.objectKey,
+              video.storageKey
+            ),
+            eq(uploadSessions.status, "completed")
+          )
+        )
+        .limit(1);
+
+      if (!completedUpload) {
+        return Response.json(
+          { error: "Recording upload is not completed" },
+          { status: 409 }
+        );
+      }
+    }
+
+    const [activeJob] = await db
+      .select({ id: processingJobs.id })
+      .from(processingJobs)
+      .where(
+        and(
+          eq(processingJobs.videoId, videoId),
+          inArray(processingJobs.status, [
+            "pending",
+            "processing",
+          ])
+        )
+      )
+      .limit(1);
+
+    if (activeJob) {
+      return Response.json(
+        {
+          message: "Video processing is already queued",
+          jobId: activeJob.id,
+          videoId,
+          existing: true,
+        },
+        { status: 202 }
+      );
+    }
+
+    let processingJob: { id: string };
+
+    try {
+      [processingJob] = await db
+        .insert(processingJobs)
+        .values({ videoId })
+        .returning({ id: processingJobs.id });
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String(error.code)
+          : "";
+
+      if (code !== "23505") {
+        throw error;
+      }
+
+      const [racingJob] = await db
+        .select({ id: processingJobs.id })
+        .from(processingJobs)
+        .where(
+          and(
+            eq(processingJobs.videoId, videoId),
+            inArray(processingJobs.status, [
+              "pending",
+              "processing",
+            ])
+          )
+        )
+        .limit(1);
+
+      if (!racingJob) {
+        throw error;
+      }
+
+      return Response.json(
+        {
+          message: "Video processing is already queued",
+          jobId: racingJob.id,
+          videoId,
+          existing: true,
+        },
+        { status: 202 }
+      );
+    }
 
     try {
       await videoQueue.add(
@@ -49,6 +154,11 @@ export async function POST(request: Request) {
         },
         {
           jobId: processingJob.id,
+          attempts: 3,
+          backoff: {
+            type: "exponential",
+            delay: 2_000,
+          },
         }
       );
     } catch (queueError) {
