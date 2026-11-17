@@ -1,32 +1,34 @@
 
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
+import { and, eq, inArray } from "drizzle-orm";
 import {
-  AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   HeadObjectCommand,
-  ListPartsCommand,
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { db } from "@/db";
+import { uploadSessions } from "@/db/schema";
 import { getR2Client, getR2Bucket } from "@/lib/storage/r2";
+import {
+  abortRemoteUpload,
+  getAuthorizedSession,
+  listAllParts,
+  markSessionFailed,
+  touchSession,
+  uploadObjectKey,
+  verifyListedParts,
+  type UploadSession,
+} from "@/lib/storage/upload-sessions";
 
 export const runtime = "nodejs";
 
 const PART_SIZE = 16 * 1024 * 1024;
-const MAX_SIZE = 512 * 1024 * 1024; // Development limit
+const MAX_SIZE = 512 * 1024 * 1024;
 
-function uploadKey(videoId: string) {
-  if (!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(videoId)) {
-    throw new Error("Invalid video ID");
-  }
-  return `originals/${videoId}/source.mp4`;
-}
-
-export async function POST(request: Request) {
-  // Local development only. Authentication is required
-  // before exposing this endpoint publicly.
+function developmentOnly() {
   if (process.env.NODE_ENV !== "development") {
     return NextResponse.json(
       { error: "Unavailable" },
@@ -34,20 +36,82 @@ export async function POST(request: Request) {
     );
   }
 
+  return null;
+}
+
+function sessionPayload(session: UploadSession) {
+  return {
+    sessionId: session.id,
+    resumeToken: session.resumeToken,
+    videoId: session.videoId,
+    key: session.objectKey,
+    fileName: session.fileName,
+    fileSize: session.fileSize,
+    partSize: session.partSize,
+    partCount: session.partCount,
+    fileFingerprint: session.fileFingerprint,
+    status: session.status,
+  };
+}
+
+type SessionLoad =
+  | { ok: true; session: UploadSession }
+  | { ok: false; response: NextResponse; session?: UploadSession };
+
+async function requireActiveSession(
+  sessionId: unknown,
+  resumeToken: unknown
+): Promise<SessionLoad> {
+  const session = await getAuthorizedSession(sessionId, resumeToken);
+
+  if (!session) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Upload session not found" },
+        { status: 404 }
+      ),
+    };
+  }
+
+  if (
+    session.status === "aborted" ||
+    session.status === "failed"
+  ) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `Upload session is ${session.status}` },
+        { status: 409 }
+      ),
+      session,
+    };
+  }
+
+  return { ok: true, session };
+}
+
+export async function POST(request: Request) {
+  const blocked = developmentOnly();
+  if (blocked) return blocked;
+
   try {
     const body = await request.json();
     const client = getR2Client();
     const bucket = getR2Bucket();
 
     if (body.action === "init") {
-      const { fileName, fileSize } = body;
+      const { fileName, fileSize, fileFingerprint } = body;
 
       if (
         typeof fileName !== "string" ||
         !fileName.toLowerCase().endsWith(".mp4") ||
         !Number.isSafeInteger(fileSize) ||
         fileSize <= 0 ||
-        fileSize > MAX_SIZE
+        fileSize > MAX_SIZE ||
+        typeof fileFingerprint !== "string" ||
+        fileFingerprint.length < 3 ||
+        fileFingerprint.length > 1024
       ) {
         return NextResponse.json(
           { error: "Select an MP4 under 512 MiB" },
@@ -56,9 +120,11 @@ export async function POST(request: Request) {
       }
 
       const videoId = randomUUID();
-      const key = uploadKey(videoId);
+      const resumeToken = randomUUID();
+      const key = uploadObjectKey(videoId);
+      const partCount = Math.ceil(fileSize / PART_SIZE);
 
-      const result = await client.send(
+      const created = await client.send(
         new CreateMultipartUploadCommand({
           Bucket: bucket,
           Key: key,
@@ -66,50 +132,150 @@ export async function POST(request: Request) {
         })
       );
 
-      if (!result.UploadId) {
+      if (!created.UploadId) {
         throw new Error("R2 did not return an upload ID");
       }
 
-      return NextResponse.json({
-        videoId,
-        uploadId: result.UploadId,
-        key,
-        partSize: PART_SIZE,
-        partCount: Math.ceil(fileSize / PART_SIZE),
-      });
+      try {
+        const [session] = await db
+          .insert(uploadSessions)
+          .values({
+            videoId,
+            resumeToken,
+            r2UploadId: created.UploadId,
+            objectKey: key,
+            fileName,
+            fileSize,
+            partSize: PART_SIZE,
+            partCount,
+            fileFingerprint,
+            status: "initiated",
+          })
+          .returning();
+
+        return NextResponse.json(sessionPayload(session));
+      } catch (error) {
+        try {
+          await abortRemoteUpload(
+            client,
+            bucket,
+            key,
+            created.UploadId
+          );
+        } catch (abortError) {
+          console.error(
+            "Failed to abort orphaned multipart upload:",
+            abortError
+          );
+        }
+
+        throw error;
+      }
     }
 
-    const { videoId, uploadId } = body;
-
-    if (
-      typeof videoId !== "string" ||
-      typeof uploadId !== "string" ||
-      !uploadId
-    ) {
-      return NextResponse.json(
-        { error: "Missing upload identifiers" },
-        { status: 400 }
+    if (body.action === "recover") {
+      const session = await getAuthorizedSession(
+        body.sessionId,
+        body.resumeToken
       );
+
+      if (!session) {
+        return NextResponse.json(
+          { error: "Upload session not found" },
+          { status: 404 }
+        );
+      }
+
+      if (
+        session.status === "aborted" ||
+        session.status === "failed"
+      ) {
+        return NextResponse.json(
+          { error: `Upload session is ${session.status}` },
+          { status: 409 }
+        );
+      }
+
+      if (session.status === "completed") {
+        return NextResponse.json({
+          ...sessionPayload(session),
+          parts: [],
+          uploadedBytes: session.fileSize,
+          completed: true,
+        });
+      }
+
+      try {
+        const parts = await listAllParts(
+          client,
+          bucket,
+          session.objectKey,
+          session.r2UploadId
+        );
+
+        if (session.status === "initiated" && parts.length > 0) {
+          await touchSession(session.id, "uploading");
+          session.status = "uploading";
+        } else {
+          await touchSession(session.id);
+        }
+
+        const uploadedBytes = parts.reduce(
+          (total, part) => total + part.size,
+          0
+        );
+
+        return NextResponse.json({
+          ...sessionPayload(session),
+          parts: parts.map((part) => ({
+            partNumber: part.partNumber,
+            size: part.size,
+          })),
+          uploadedBytes,
+          completed: false,
+        });
+      } catch (error) {
+        console.error("Recover ListParts failed:", error);
+        await markSessionFailed(session.id);
+
+        return NextResponse.json(
+          {
+            error:
+              "Upload session is no longer available in R2. Start a new upload.",
+          },
+          { status: 409 }
+        );
+      }
     }
 
-    let key: string;
+    const loaded = await requireActiveSession(
+      body.sessionId,
+      body.resumeToken
+    );
 
-    try {
-      key = uploadKey(videoId);
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid video ID" },
-        { status: 400 }
-      );
+    if (!loaded.ok) {
+      return loaded.response;
     }
+
+    const session = loaded.session;
 
     if (body.action === "sign") {
+      if (
+        session.status !== "initiated" &&
+        session.status !== "uploading"
+      ) {
+        return NextResponse.json(
+          { error: `Cannot sign parts while ${session.status}` },
+          { status: 409 }
+        );
+      }
+
       const partNumber = body.partNumber;
 
       if (
         !Number.isInteger(partNumber) ||
         partNumber < 1 ||
-        partNumber > Math.ceil(MAX_SIZE / PART_SIZE)
+        partNumber > session.partCount
       ) {
         return NextResponse.json(
           { error: "Invalid part number" },
@@ -119,8 +285,8 @@ export async function POST(request: Request) {
 
       const command = new UploadPartCommand({
         Bucket: bucket,
-        Key: key,
-        UploadId: uploadId,
+        Key: session.objectKey,
+        UploadId: session.r2UploadId,
         PartNumber: partNumber,
       });
 
@@ -128,105 +294,223 @@ export async function POST(request: Request) {
         expiresIn: 900,
       });
 
+      if (session.status === "initiated") {
+        await touchSession(session.id, "uploading");
+      } else {
+        await touchSession(session.id);
+      }
+
       return NextResponse.json({ url, partNumber });
     }
 
     if (body.action === "complete") {
-      const expectedSize = body.fileSize;
+      if (session.status === "completed") {
+        return NextResponse.json({
+          success: true,
+          sessionId: session.id,
+          videoId: session.videoId,
+          key: session.objectKey,
+          size: session.fileSize,
+          alreadyCompleted: true,
+        });
+      }
 
       if (
-        !Number.isSafeInteger(expectedSize) ||
-        expectedSize <= 0 ||
-        expectedSize > MAX_SIZE
+        session.status !== "initiated" &&
+        session.status !== "uploading" &&
+        session.status !== "completing"
       ) {
         return NextResponse.json(
-          { error: "Invalid file size" },
-          { status: 400 }
+          { error: `Cannot complete while ${session.status}` },
+          { status: 409 }
         );
       }
 
-      const result = await client.send(
-        new ListPartsCommand({
-          Bucket: bucket,
-          Key: key,
-          UploadId: uploadId,
+      const claimed = await db
+        .update(uploadSessions)
+        .set({
+          status: "completing",
+          updatedAt: new Date(),
         })
-      );
+        .where(
+          and(
+            eq(uploadSessions.id, session.id),
+            inArray(uploadSessions.status, [
+              "initiated",
+              "uploading",
+              "completing",
+            ])
+          )
+        )
+        .returning();
 
-      const parts = (result.Parts ?? [])
-        .filter((p) => p.PartNumber && p.ETag)
-        .sort((a, b) => a.PartNumber! - b.PartNumber!);
+      if (claimed.length === 0) {
+        const [latest] = await db
+          .select()
+          .from(uploadSessions)
+          .where(eq(uploadSessions.id, session.id))
+          .limit(1);
 
-      const expectedCount = Math.ceil(
-        expectedSize / PART_SIZE
-      );
+        if (latest?.status === "completed") {
+          return NextResponse.json({
+            success: true,
+            sessionId: latest.id,
+            videoId: latest.videoId,
+            key: latest.objectKey,
+            size: latest.fileSize,
+            alreadyCompleted: true,
+          });
+        }
 
-      if (parts.length !== expectedCount) {
         return NextResponse.json(
-          { error: "Not all parts were uploaded" },
-          { status: 400 }
+          { error: "Upload session is not completable" },
+          { status: 409 }
         );
       }
 
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        const expectedPartSize =
-          i === parts.length - 1
-            ? expectedSize - i * PART_SIZE
-            : PART_SIZE;
+      try {
+        const parts = await listAllParts(
+          client,
+          bucket,
+          session.objectKey,
+          session.r2UploadId
+        );
 
-        if (
-          part.PartNumber !== i + 1 ||
-          part.Size !== expectedPartSize
-        ) {
+        const verificationError = verifyListedParts(
+          parts,
+          session.fileSize,
+          session.partSize,
+          session.partCount
+        );
+
+        if (verificationError) {
+          await touchSession(session.id, "uploading");
+
           return NextResponse.json(
-            { error: "Part order or size mismatch" },
+            { error: verificationError },
             { status: 400 }
           );
         }
+
+        await client.send(
+          new CompleteMultipartUploadCommand({
+            Bucket: bucket,
+            Key: session.objectKey,
+            UploadId: session.r2UploadId,
+            MultipartUpload: {
+              Parts: parts.map((part) => ({
+                PartNumber: part.partNumber,
+                ETag: part.etag,
+              })),
+            },
+          })
+        );
+
+        const object = await client.send(
+          new HeadObjectCommand({
+            Bucket: bucket,
+            Key: session.objectKey,
+          })
+        );
+
+        if (object.ContentLength !== session.fileSize) {
+          await markSessionFailed(session.id);
+          throw new Error("Completed object size mismatch");
+        }
+
+        const now = new Date();
+
+        await db
+          .update(uploadSessions)
+          .set({
+            status: "completed",
+            updatedAt: now,
+            completedAt: now,
+          })
+          .where(eq(uploadSessions.id, session.id));
+
+        return NextResponse.json({
+          success: true,
+          sessionId: session.id,
+          videoId: session.videoId,
+          key: session.objectKey,
+          size: object.ContentLength,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "";
+
+        // Idempotent completion: object already finalized.
+        if (/NoSuchUpload|already completed|not found/i.test(message)) {
+          try {
+            const object = await client.send(
+              new HeadObjectCommand({
+                Bucket: bucket,
+                Key: session.objectKey,
+              })
+            );
+
+            if (object.ContentLength === session.fileSize) {
+              const now = new Date();
+
+              await db
+                .update(uploadSessions)
+                .set({
+                  status: "completed",
+                  updatedAt: now,
+                  completedAt: now,
+                })
+                .where(eq(uploadSessions.id, session.id));
+
+              return NextResponse.json({
+                success: true,
+                sessionId: session.id,
+                videoId: session.videoId,
+                key: session.objectKey,
+                size: object.ContentLength,
+                alreadyCompleted: true,
+              });
+            }
+          } catch {
+            // Fall through to failure handling.
+          }
+        }
+
+        await markSessionFailed(session.id);
+        throw error;
       }
-
-      await client.send(
-        new CompleteMultipartUploadCommand({
-          Bucket: bucket,
-          Key: key,
-          UploadId: uploadId,
-          MultipartUpload: {
-            Parts: parts.map((p) => ({
-              PartNumber: p.PartNumber!,
-              ETag: p.ETag!,
-            })),
-          },
-        })
-      );
-
-      const object = await client.send(
-        new HeadObjectCommand({
-          Bucket: bucket,
-          Key: key,
-        })
-      );
-
-      if (object.ContentLength !== expectedSize) {
-        throw new Error("Completed object size mismatch");
-      }
-
-      return NextResponse.json({
-        success: true,
-        videoId,
-        key,
-        size: object.ContentLength,
-      });
     }
 
     if (body.action === "abort") {
-      await client.send(
-        new AbortMultipartUploadCommand({
-          Bucket: bucket,
-          Key: key,
-          UploadId: uploadId,
+      if (session.status === "aborted") {
+        return NextResponse.json({ aborted: true });
+      }
+
+      if (session.status === "completed") {
+        return NextResponse.json(
+          { error: "Completed uploads cannot be aborted" },
+          { status: 409 }
+        );
+      }
+
+      try {
+        await abortRemoteUpload(
+          client,
+          bucket,
+          session.objectKey,
+          session.r2UploadId
+        );
+      } catch (error) {
+        console.error("AbortMultipartUpload failed:", error);
+      }
+
+      await db
+        .update(uploadSessions)
+        .set({
+          status: "aborted",
+          updatedAt: new Date(),
         })
-      );
+        .where(eq(uploadSessions.id, session.id));
 
       return NextResponse.json({ aborted: true });
     }
