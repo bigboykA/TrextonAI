@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -11,7 +12,7 @@ import {
 import { ClipPlayer } from "@/components/clips/clip-player";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useWorkspace } from "@/components/providers/workspace-provider";
-import { useClips } from "@/hooks/use-clips";
+import { useClip } from "@/hooks/use-clip";
 import {
   formatDuration,
   formatRelativeDate,
@@ -20,10 +21,16 @@ import {
 } from "@/lib/format";
 
 export function ClipReview({ clipId }: { clipId: string }) {
-  const { activeVideoId } = useWorkspace();
-  const { clips, isLoading, error } = useClips(activeVideoId);
-  const clip = clips.find((item) => item.id === clipId);
+  const { setActiveVideoId, setActiveJobId } = useWorkspace();
+  const { clip, isLoading, error } = useClip(clipId);
   const videoUrl = `/api/clips/${clipId}/video`;
+
+  useEffect(() => {
+    if (clip) {
+      setActiveVideoId(clip.videoId);
+      setActiveJobId(clip.jobId);
+    }
+  }, [clip, setActiveJobId, setActiveVideoId]);
 
   if (isLoading) {
     return (
@@ -34,14 +41,13 @@ export function ClipReview({ clipId }: { clipId: string }) {
     );
   }
 
-  if (activeVideoId && (error || (!isLoading && !clip))) {
+  if (error || (!isLoading && !clip)) {
     return (
       <EmptyState
         icon={Film}
         title="Clip details unavailable"
         description={
-          error ??
-          "This clip does not belong to the recording currently selected in the workspace."
+          error ?? "This generated clip could not be found."
         }
         action={{ label: "Return to library", href: "/library" }}
       />
@@ -69,10 +75,7 @@ export function ClipReview({ clipId }: { clipId: string }) {
           </div>
         </div>
         <a
-          href={videoUrl}
-          download={
-            clip ? `trexton-highlight-${clip.rank}.mp4` : "trexton-clip.mp4"
-          }
+          href={`${videoUrl}?download=1`}
           className="inline-flex h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-medium transition-colors duration-[var(--motion-feedback)] hover:border-primary/30 hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:h-8"
         >
           <Download aria-hidden="true" className="size-3.5" />
@@ -82,6 +85,7 @@ export function ClipReview({ clipId }: { clipId: string }) {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
         <ClipPlayer
+          key={videoUrl}
           src={videoUrl}
           title={clip?.reason || "Generated clip"}
         />

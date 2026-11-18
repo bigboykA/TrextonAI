@@ -1,457 +1,117 @@
-
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
-
-const MAX_SIZE = 512 * 1024 * 1024;
-const CONCURRENCY = 3;
-const MAX_RETRIES = 3;
-const LOCAL_SESSION_KEY = "trexton.uploadSession.v1";
-
-/**
- * File identity for resume matching.
- * Uses name + size + lastModified. This is NOT cryptographic:
- * copies can change lastModified, and colliding names/sizes are possible.
- */
-function fileFingerprint(file: File) {
-  return `${file.name}|${file.size}|${file.lastModified}`;
-}
-
-type Session = {
-  sessionId: string;
-  resumeToken: string;
-  videoId: string;
-  key: string;
-  fileName: string;
-  fileSize: number;
-  partSize: number;
-  partCount: number;
-  fileFingerprint: string;
-  status: string;
-};
-
-type RecoveredPart = {
-  partNumber: number;
-  size: number;
-};
-
-type LocalSession = {
-  sessionId: string;
-  resumeToken: string;
-  fileName: string;
-  fileSize: number;
-  fileFingerprint: string;
-};
-
-type ApiErrorBody = {
-  error?: string;
-};
-
-async function api<T>(data: Record<string, unknown>): Promise<T> {
-  const response = await fetch("/api/uploads/multipart", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-
-  const body = (await response.json()) as T & ApiErrorBody;
-
-  if (!response.ok) {
-    throw new Error(body.error ?? "Upload API failed");
-  }
-
-  return body;
-}
-
-function loadLocalSession(): LocalSession | null {
-  try {
-    const raw = localStorage.getItem(LOCAL_SESSION_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as LocalSession;
-
-    if (
-      typeof parsed.sessionId !== "string" ||
-      typeof parsed.resumeToken !== "string" ||
-      typeof parsed.fileName !== "string" ||
-      typeof parsed.fileSize !== "number" ||
-      typeof parsed.fileFingerprint !== "string"
-    ) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalSession(session: LocalSession) {
-  try {
-    localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
-  } catch {
-    // Private browsing / quota — recovery just won't survive refresh.
-  }
-  notifyLocalSessionListeners();
-}
-
-function clearLocalSession() {
-  try {
-    localStorage.removeItem(LOCAL_SESSION_KEY);
-  } catch {
-    // Ignore storage failures.
-  }
-  notifyLocalSessionListeners();
-}
-
-const localSessionListeners = new Set<() => void>();
-
-function notifyLocalSessionListeners() {
-  for (const listener of localSessionListeners) {
-    listener();
-  }
-}
-
-function subscribeLocalSession(listener: () => void) {
-  localSessionListeners.add(listener);
-  return () => {
-    localSessionListeners.delete(listener);
-  };
-}
-
-function getLocalSessionSnapshot() {
-  return loadLocalSession();
-}
-
-function getLocalSessionServerSnapshot(): LocalSession | null {
-  return null;
-}
-
-async function uploadPart(
-  file: File,
-  session: Session,
-  index: number
-) {
-  const partNumber = index + 1;
-  const start = index * session.partSize;
-  const end = Math.min(start + session.partSize, file.size);
-  const chunk = file.slice(start, end);
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const { url } = await api<{ url: string }>({
-        action: "sign",
-        sessionId: session.sessionId,
-        resumeToken: session.resumeToken,
-        partNumber,
-      });
-
-      const response = await fetch(url, {
-        method: "PUT",
-        body: chunk,
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Part ${partNumber} failed: HTTP ${response.status}`
-        );
-      }
-
-      return chunk.size;
-    } catch (error) {
-      if (attempt === MAX_RETRIES - 1) throw error;
-
-      await new Promise((resolve) =>
-        setTimeout(resolve, 500 * 2 ** attempt)
-      );
-    }
-  }
-
-  throw new Error(`Part ${partNumber} failed`);
-}
+import {
+  CheckCircle2,
+  CloudUpload,
+  FileVideo,
+  LoaderCircle,
+  TriangleAlert,
+} from "lucide-react";
+import { useUploadManager } from "@/components/providers/upload-provider";
+import { formatFileSize } from "@/lib/format";
 
 export default function UploadTestPage() {
-  const pending = useSyncExternalStore(
-    subscribeLocalSession,
-    getLocalSessionSnapshot,
-    getLocalSessionServerSnapshot
-  );
-  const [status, setStatus] = useState("Choose an MP4");
-  const [progress, setProgress] = useState(0);
-  const [busy, setBusy] = useState(false);
-
-  const displayStatus =
-    pending && status === "Choose an MP4"
-      ? `Unfinished upload found: ${pending.fileName}. Re-select that exact file to resume, or cancel.`
-      : status;
-
-  async function cancelPending() {
-    if (!pending || busy) return;
-
-    setBusy(true);
-    setStatus("Cancelling unfinished upload...");
-
-    try {
-      await api({
-        action: "abort",
-        sessionId: pending.sessionId,
-        resumeToken: pending.resumeToken,
-      });
-    } catch {
-      // Session may already be gone in R2/DB.
-    }
-
-    clearLocalSession();
-    setProgress(0);
-    setStatus("Cancelled. Choose an MP4 to start a new upload.");
-    setBusy(false);
-  }
-
-  async function upload(file: File) {
-    if (busy) return;
-
-    if (
-      !file.name.toLowerCase().endsWith(".mp4") ||
-      file.size === 0 ||
-      file.size > MAX_SIZE
-    ) {
-      setStatus("Select an MP4 under 512 MiB");
-      return;
-    }
-
-    const fingerprint = fileFingerprint(file);
-    setBusy(true);
-    setProgress(0);
-
-    let session: Session | null = null;
-
-    try {
-      const saved = pending ?? loadLocalSession();
-
-      if (saved) {
-        if (saved.fileFingerprint !== fingerprint) {
-          setStatus(
-            `Selected file does not match unfinished upload (${saved.fileName}, ${saved.fileSize} bytes). Re-select the original file or cancel the pending upload.`
-          );
-          return;
-        }
-
-        setStatus("Recovering upload session from R2...");
-
-        const recovered = await api<
-          Session & {
-            parts: RecoveredPart[];
-            uploadedBytes: number;
-            completed: boolean;
-          }
-        >({
-          action: "recover",
-          sessionId: saved.sessionId,
-          resumeToken: saved.resumeToken,
-        });
-
-        if (recovered.completed) {
-          clearLocalSession();
-          setProgress(100);
-          setStatus(`Upload already complete! ${recovered.key}`);
-          return;
-        }
-
-        session = recovered;
-        saveLocalSession({
-          sessionId: recovered.sessionId,
-          resumeToken: recovered.resumeToken,
-          fileName: recovered.fileName,
-          fileSize: recovered.fileSize,
-          fileFingerprint: recovered.fileFingerprint,
-        });
-
-        const uploadedPartNumbers = new Set(
-          recovered.parts.map((part) => part.partNumber)
-        );
-        const missingIndexes = Array.from(
-          { length: recovered.partCount },
-          (_, index) => index
-        ).filter(
-          (index) => !uploadedPartNumbers.has(index + 1)
-        );
-
-        let completedBytes = recovered.uploadedBytes;
-        setProgress(
-          Math.round((completedBytes / file.size) * 100)
-        );
-        setStatus(
-          missingIndexes.length === 0
-            ? "All parts verified. Finalizing..."
-            : `Resuming... ${missingIndexes.length} parts remaining`
-        );
-
-        let cursor = 0;
-
-        async function resumeWorker() {
-          while (cursor < missingIndexes.length) {
-            const index = missingIndexes[cursor++];
-            const bytes = await uploadPart(file, session!, index);
-            completedBytes += bytes;
-            const percentage = Math.round(
-              (completedBytes / file.size) * 100
-            );
-            setProgress(percentage);
-            setStatus(`Uploading... ${percentage}%`);
-          }
-        }
-
-        await Promise.all(
-          Array.from(
-            {
-              length: Math.min(CONCURRENCY, missingIndexes.length || 1),
-            },
-            () => resumeWorker()
-          )
-        );
-      } else {
-        setStatus("Starting multipart upload...");
-
-        const activeSession = await api<Session>({
-          action: "init",
-          fileName: file.name,
-          fileSize: file.size,
-          fileFingerprint: fingerprint,
-        });
-
-        session = activeSession;
-        saveLocalSession({
-          sessionId: activeSession.sessionId,
-          resumeToken: activeSession.resumeToken,
-          fileName: activeSession.fileName,
-          fileSize: activeSession.fileSize,
-          fileFingerprint: activeSession.fileFingerprint,
-        });
-
-        const indexes = Array.from(
-          { length: activeSession.partCount },
-          (_, index) => index
-        );
-        let nextIndex = 0;
-        let completedBytes = 0;
-
-        async function worker() {
-          while (nextIndex < indexes.length) {
-            const index = nextIndex++;
-            const bytes = await uploadPart(
-              file,
-              activeSession,
-              index
-            );
-            completedBytes += bytes;
-            const percentage = Math.round(
-              (completedBytes / file.size) * 100
-            );
-            setProgress(percentage);
-            setStatus(`Uploading... ${percentage}%`);
-          }
-        }
-
-        await Promise.all(
-          Array.from(
-            {
-              length: Math.min(CONCURRENCY, activeSession.partCount),
-            },
-            () => worker()
-          )
-        );
-      }
-
-      if (!session) {
-        throw new Error("Missing upload session");
-      }
-
-      setStatus("Finalizing recording...");
-
-      const result = await api<{ key: string }>({
-        action: "complete",
-        sessionId: session.sessionId,
-        resumeToken: session.resumeToken,
-      });
-
-      clearLocalSession();
-      setStatus(`Upload complete! ${result.key}`);
-      setProgress(100);
-      session = null;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Upload failed";
-
-      setStatus(message);
-
-      // Keep session for recoverable failures (network, part retries).
-      // Only clear when the server says the session is gone/terminal.
-      const terminal =
-        /not found|aborted|no longer available|failed/i.test(
-          message
-        );
-
-      if (terminal) {
-        clearLocalSession();
-      } else if (session) {
-        saveLocalSession({
-          sessionId: session.sessionId,
-          resumeToken: session.resumeToken,
-          fileName: session.fileName,
-          fileSize: session.fileSize,
-          fileFingerprint: session.fileFingerprint,
-        });
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
+  const upload = useUploadManager();
+  const isActive = [
+    "preparing",
+    "uploading",
+    "finalizing",
+    "waiting_processing",
+    "queued",
+    "processing",
+    "cancelling",
+  ].includes(upload.phase);
 
   return (
-    <main className="mx-auto max-w-xl p-10">
-      <h1 className="mb-6 text-2xl font-semibold">
-        Trexton Multipart Upload Test
-      </h1>
+    <div className="mx-auto max-w-2xl space-y-6">
+      <header className="border-b border-border pb-5">
+        <p className="text-xs font-medium text-primary">
+          Development diagnostic
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">
+          Resumable upload test
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          This route uses the same application-level upload manager as the
+          main New recording flow.
+        </p>
+      </header>
 
-      <p className="mb-4 text-sm text-muted-foreground">
-        Refresh-safe resume uses PostgreSQL session state plus R2
-        ListParts. File identity is name|size|lastModified — re-select
-        the original file after refresh.
-      </p>
+      <section className="rounded-2xl border border-border bg-card p-5">
+        <div className="flex items-start gap-3">
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+            {upload.phase === "failed" ? (
+              <TriangleAlert aria-hidden="true" className="size-4.5" />
+            ) : upload.phase === "completed" ? (
+              <CheckCircle2 aria-hidden="true" className="size-4.5" />
+            ) : isActive ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-4.5 animate-spin motion-reduce:animate-none"
+              />
+            ) : upload.savedSession ? (
+              <FileVideo aria-hidden="true" className="size-4.5" />
+            ) : (
+              <CloudUpload aria-hidden="true" className="size-4.5" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold">
+              {upload.savedSession
+                ? upload.savedSession.fileName
+                : "No resumable upload stored"}
+            </h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Phase: {upload.phase.replaceAll("_", " ")}
+              {upload.savedSession
+                ? ` · ${formatFileSize(upload.savedSession.fileSize)}`
+                : ""}
+            </p>
+          </div>
+        </div>
 
-      <input
-        type="file"
-        accept=".mp4,video/mp4"
-        disabled={busy}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void upload(file);
-          event.target.value = "";
-        }}
-      />
+        {upload.progress > 0 ? (
+          <div className="mt-5">
+            <div className="flex justify-between text-xs">
+              <span>Verified and transferred</span>
+              <span className="tabular-nums text-muted-foreground">
+                {upload.progress}%
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary"
+                style={{ width: `${upload.progress}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
 
-      {pending ? (
+        {upload.error ? (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl bg-destructive/8 px-3 py-2.5 text-xs text-destructive"
+          >
+            {upload.error}
+          </p>
+        ) : null}
+
         <button
           type="button"
-          className="mt-4 rounded border px-3 py-1.5 text-sm"
-          disabled={busy}
-          onClick={() => void cancelPending()}
+          onClick={upload.openDialog}
+          className="mt-5 inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
         >
-          Cancel unfinished upload
+          <CloudUpload aria-hidden="true" className="size-4" />
+          {upload.savedSession ? "Open resume flow" : "Open upload flow"}
         </button>
-      ) : null}
+      </section>
 
-      <div className="mt-6">
-        <progress
-          className="w-full"
-          max={100}
-          value={progress}
-          aria-label="Upload progress"
-        />
-        <p className="mt-3 break-all text-sm" suppressHydrationWarning>
-          {displayStatus}
-        </p>
-      </div>
-    </main>
+      <p className="text-xs leading-5 text-muted-foreground">
+        Close the dialog or navigate elsewhere while uploading to verify
+        that the transfer remains owned by the root provider. Refresh to
+        verify that the persisted session requests the original file
+        again.
+      </p>
+    </div>
   );
 }

@@ -241,7 +241,8 @@ export async function uploadFileToR2(
 
 export async function createR2DownloadUrl(
   key: string,
-  expiresIn = 300
+  expiresIn = 300,
+  downloadName?: string
 ) {
   validateR2ObjectKey(key);
 
@@ -249,11 +250,21 @@ export async function createR2DownloadUrl(
     throw new Error("Invalid signed URL expiry");
   }
 
+  if (
+    downloadName !== undefined &&
+    !/^[a-z0-9._-]{1,120}$/i.test(downloadName)
+  ) {
+    throw new Error("Invalid download filename");
+  }
+
   return getSignedUrl(
     getR2Client(),
     new GetObjectCommand({
       Bucket: getR2Bucket(),
       Key: key,
+      ResponseContentDisposition: downloadName
+        ? `attachment; filename="${downloadName}"`
+        : undefined,
     }),
     { expiresIn }
   );

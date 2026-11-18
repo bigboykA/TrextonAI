@@ -15,7 +15,10 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import { FormEvent, useState } from "react";
 import { BrandWordmark } from "@/components/brand/brand-mark";
+import { useUploadManager } from "@/components/providers/upload-provider";
 import { useWorkspace } from "@/components/providers/workspace-provider";
+import { NewRecordingDialog } from "@/components/uploads/new-recording-dialog";
+import { UploadStatusIndicator } from "@/components/uploads/upload-status-indicator";
 import {
   motionTransitions,
   reducedMotionTransition,
@@ -117,6 +120,7 @@ export function AppShell({
   const shouldReduceMotion = useReducedMotion();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { librarySearch, setLibrarySearch } = useWorkspace();
+  const { openDialog } = useUploadManager();
 
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -218,6 +222,7 @@ export function AppShell({
             />
           </form>
           <div className="ml-auto flex items-center gap-2">
+            <UploadStatusIndicator />
             <Link
               href="/processing"
               className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-xs font-medium text-muted-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
@@ -225,13 +230,14 @@ export function AppShell({
               <CircleDotDashed aria-hidden="true" className="size-3.5" />
               Activity
             </Link>
-            <Link
-              href="/processing"
+            <button
+              type="button"
+              onClick={openDialog}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm transition-transform duration-[var(--motion-feedback)] hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none"
             >
               <Plus aria-hidden="true" className="size-3.5" />
               New
-            </Link>
+            </button>
           </div>
         </header>
       </motion.div>
@@ -246,13 +252,14 @@ export function AppShell({
           >
             <Search aria-hidden="true" className="size-4" />
           </Link>
-          <Link
-            href="/processing"
+          <button
+            type="button"
+            onClick={openDialog}
             aria-label="Start new activity"
             className="grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
           >
             <Plus aria-hidden="true" className="size-4" />
-          </Link>
+          </button>
         </div>
       </header>
 
@@ -289,6 +296,11 @@ export function AppShell({
           />
         ))}
       </nav>
+
+      <div className="fixed bottom-20 right-3 z-40 md:hidden">
+        <UploadStatusIndicator />
+      </div>
+      <NewRecordingDialog />
     </div>
   );
 }

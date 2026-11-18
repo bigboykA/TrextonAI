@@ -9,11 +9,12 @@ import {
   SearchX,
   TriangleAlert,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useClips } from "@/hooks/use-clips";
 import { useWorkspace } from "@/components/providers/workspace-provider";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs } from "@/components/ui/tabs";
+import type { SubmissionStatus } from "@/lib/frontend-types";
 import { ClipGrid } from "./clip-grid";
 
 function ClipSkeletons({ count = 3 }: { count?: number }) {
@@ -39,9 +40,11 @@ function ClipSkeletons({ count = 3 }: { count?: number }) {
 export function ClipsPanel({
   limit,
   showHeader = true,
+  processingStatus,
 }: {
   limit?: number;
   showHeader?: boolean;
+  processingStatus?: SubmissionStatus;
 }) {
   const {
     activeVideoId,
@@ -54,6 +57,12 @@ export function ClipsPanel({
   const [sort, setSort] = useState("newest");
   const [view, setView] = useState<"grid" | "list">("grid");
   const showControls = typeof limit !== "number";
+
+  useEffect(() => {
+    if (processingStatus === "completed") {
+      void refresh();
+    }
+  }, [processingStatus, refresh]);
 
   const visibleClips = useMemo(() => {
     const query = librarySearch.trim().toLowerCase();
@@ -236,18 +245,45 @@ export function ClipsPanel({
             title={
               librarySearch || filter !== "all"
                 ? "No matching clips"
-                : "No highlights yet"
+                : processingStatus === "processing"
+                  ? "Highlights are being generated"
+                  : processingStatus === "queued" ||
+                      processingStatus === "pending" ||
+                      processingStatus === "awaiting_publication"
+                    ? "Recording is waiting to process"
+                    : processingStatus === "failed"
+                      ? "Processing needs attention"
+                      : "No highlights yet"
             }
             description={
               librarySearch || filter !== "all"
                 ? "Try a different search or filter."
-                : "Process this recording to bring its strongest moments into the library."
+                : processingStatus === "processing"
+                  ? "Trexton is analyzing the recording. This library will refresh as soon as clips are ready."
+                  : processingStatus === "queued" ||
+                      processingStatus === "pending" ||
+                      processingStatus === "awaiting_publication"
+                    ? "The upload is complete and will begin processing as soon as infrastructure is available."
+                    : processingStatus === "failed"
+                      ? "Open Activity to review the failure or explicitly reprocess this recording."
+                      : processingStatus === "completed"
+                        ? "Processing completed without creating any highlight clips."
+                        : "Process this recording to bring its strongest moments into the library."
             }
             action={
               librarySearch || filter !== "all"
                 ? undefined
+                : processingStatus === "processing" ||
+                    processingStatus === "queued" ||
+                    processingStatus === "pending" ||
+                    processingStatus === "awaiting_publication" ||
+                    processingStatus === "completed"
+                  ? undefined
                 : {
-                    label: "Process this video",
+                    label:
+                      processingStatus === "failed"
+                        ? "Open activity"
+                        : "Process this video",
                     href: "/processing",
                   }
             }

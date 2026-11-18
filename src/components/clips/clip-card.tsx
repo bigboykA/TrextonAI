@@ -85,8 +85,7 @@ export function ClipCard({
               <ArrowUpRight aria-hidden="true" className="size-3.5" />
             </Link>
             <a
-              href={videoUrl}
-              download={`trexton-highlight-${clip.rank}.mp4`}
+              href={`${videoUrl}?download=1`}
               aria-label={`Download clip ${clip.rank}`}
               className="grid size-11 place-items-center rounded-lg text-muted-foreground transition-colors duration-[var(--motion-feedback)] hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:size-8"
             >

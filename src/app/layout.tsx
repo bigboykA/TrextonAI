@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { UploadProvider } from "@/components/providers/upload-provider";
 import { WorkspaceProvider } from "@/components/providers/workspace-provider";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +43,9 @@ export default function RootLayout({
       <body className="min-h-full">
         <ThemeProvider>
           <WorkspaceProvider>
-            <AppShell>{children}</AppShell>
+            <UploadProvider>
+              <AppShell>{children}</AppShell>
+            </UploadProvider>
           </WorkspaceProvider>
         </ThemeProvider>
       </body>

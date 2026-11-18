@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { ArrowRight, Film, Plus, Radio } from "lucide-react";
 import { ClipsPanel } from "@/components/clips/clips-panel";
+import { useUploadManager } from "@/components/providers/upload-provider";
 import { useWorkspace } from "@/components/providers/workspace-provider";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJob } from "@/hooks/use-job";
 
 export function WorkspaceView() {
   const { activeVideoId, activeJobId } = useWorkspace();
+  const { openDialog } = useUploadManager();
   const { job, error } = useJob(activeJobId);
 
   return (
@@ -22,13 +24,14 @@ export function WorkspaceView() {
             Pick up where you left off.
           </p>
         </div>
-        <Link
-          href="/processing"
+        <button
+          type="button"
+          onClick={openDialog}
           className="inline-flex h-11 items-center gap-2 self-start rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground shadow-sm transition-transform duration-[var(--motion-feedback)] hover:scale-[1.02] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transform-none sm:h-9 sm:self-auto"
         >
           <Plus aria-hidden="true" className="size-3.5" />
-          New activity
-        </Link>
+          New recording
+        </button>
       </header>
 
       <div className="grid overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]">
@@ -43,8 +46,8 @@ export function WorkspaceView() {
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 {activeVideoId
-                  ? "Local recording ready"
-                  : "No local video selected"}
+                  ? "Cloud recording selected"
+                  : "No recording selected"}
               </p>
             </div>
             <div className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">

@@ -1,5 +1,5 @@
-import { ProcessingView } from "@/components/processing/processing-view";
+import { ActivityView } from "@/components/activity/activity-view";
 
 export default function ProcessingPage() {
-  return <ProcessingView />;
+  return <ActivityView />;
 }

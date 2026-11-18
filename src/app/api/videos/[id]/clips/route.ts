@@ -12,6 +12,13 @@ export async function GET(
   _request: NextRequest,
   { params }: Context
 ) {
+  if (process.env.NODE_ENV !== "development") {
+    return NextResponse.json(
+      { error: "Unavailable" },
+      { status: 403 }
+    );
+  }
+
   const { id: videoId } = await params;
 
   const uuidRegex =
@@ -26,7 +33,18 @@ export async function GET(
 
   try {
     const clips = await db
-      .select()
+      .select({
+        id: generatedClips.id,
+        videoId: generatedClips.videoId,
+        jobId: generatedClips.jobId,
+        rank: generatedClips.rank,
+        start: generatedClips.start,
+        end: generatedClips.end,
+        score: generatedClips.score,
+        reason: generatedClips.reason,
+        transcriptText: generatedClips.transcriptText,
+        createdAt: generatedClips.createdAt,
+      })
       .from(generatedClips)
       .where(eq(generatedClips.videoId, videoId))
       .orderBy(asc(generatedClips.rank));

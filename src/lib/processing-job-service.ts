@@ -49,7 +49,7 @@ function processingPayload(
   return { videoId, jobId };
 }
 
-function submissionStatus(
+export function deriveSubmissionStatus(
   jobStatus: ProcessingRequest["jobStatus"],
   eventStatus: ProcessingRequest["eventStatus"]
 ): ProcessingRequest["submissionStatus"] {
@@ -239,7 +239,7 @@ async function ensureProcessingRequest(
     jobStatus: job.status,
     eventId: event?.id ?? null,
     eventStatus: event?.status ?? null,
-    submissionStatus: submissionStatus(
+    submissionStatus: deriveSubmissionStatus(
       job.status,
       event?.status ?? null
     ),
