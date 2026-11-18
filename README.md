@@ -118,6 +118,14 @@ R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
 R2_BUCKET_NAME=trexton-media
 # Required only when the database contains multiple users:
 # DEV_UPLOAD_USER_ID=00000000-0000-4000-8000-000000000000
+# Optional transactional-outbox tuning:
+# OUTBOX_POLL_INTERVAL_MS=2000
+# OUTBOX_BATCH_SIZE=20
+# OUTBOX_CONCURRENCY=4
+# OUTBOX_LEASE_MS=30000
+# OUTBOX_PUBLISH_TIMEOUT_MS=5000
+# OUTBOX_RETRY_BASE_MS=2000
+# OUTBOX_RETRY_MAX_MS=300000
 ```
 
 These values are intended for local development only.
@@ -144,9 +152,32 @@ npm run dev
 
 The application will be available at `http://localhost:3000`.
 
-### 7. Start the background worker
+### 7. Start the outbox dispatcher
 
 In a separate terminal:
+
+```bash
+npm run dispatcher
+```
+
+The dispatcher leases committed PostgreSQL outbox events, publishes
+them to BullMQ, and records success or schedules jittered retry.
+Multiple dispatcher instances coordinate with
+`FOR UPDATE SKIP LOCKED`. Redis is never contacted while a database
+transaction or row lock is held. Delivery is at-least-once; the
+processing job UUID is the BullMQ job ID and worker/database effects
+are idempotent.
+
+Inspect pending events, oldest age, publication counts, attempts, and
+last errors with:
+
+```bash
+npm run outbox:status
+```
+
+### 8. Start the background worker
+
+In another terminal:
 
 ```bash
 npm run worker
@@ -165,7 +196,11 @@ Legacy video rows remain supported. A storage key of
 pre-existing bare `filename.mp4` values are treated the same way.
 New uploads always use R2 object keys.
 
-### 8. Submit a test processing job
+Successful upload completion atomically registers the video, creates
+its initial processing job, and inserts the outbox event. No manual
+submission is needed for normal uploads.
+
+### 9. Explicitly reprocess a recording
 
 ```bash
 curl -X POST http://localhost:3000/api/jobs \
@@ -177,15 +212,20 @@ Expected response:
 
 ```json
 {
-  "message": "Video processing job created",
-  "jobId": "1",
-  "videoId": "test-video-123"
+  "message": "Video processing request registered",
+  "jobId": "00000000-0000-4000-8000-000000000001",
+  "videoId": "00000000-0000-4000-8000-000000000002",
+  "jobStatus": "pending",
+  "publicationStatus": "pending",
+  "submissionStatus": "awaiting_publication"
 }
 ```
 
 The endpoint accepts only registered videos. R2-backed recordings
 must have a completed upload session. Repeated requests return the
-existing pending/processing job rather than enqueueing duplicates.
+existing active job and outbox event rather than creating duplicates.
+Calling it after the previous job reaches a terminal state creates a
+new durable reprocessing request.
 
 ## Development Roadmap
 

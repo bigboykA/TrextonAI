@@ -14,8 +14,10 @@ import { uploadSessions } from "@/db/schema";
 import { getR2Client, getR2Bucket } from "@/lib/storage/r2";
 import {
   getDevelopmentUploadUserId,
-  registerCompletedUpload,
 } from "@/lib/storage/register-upload";
+import {
+  completeUploadAndRequestProcessing,
+} from "@/lib/processing-job-service";
 import {
   abortRemoteUpload,
   getAuthorizedSession,
@@ -203,13 +205,17 @@ export async function POST(request: Request) {
       }
 
       if (session.status === "completed") {
-        await registerCompletedUpload(session);
+        const processing =
+          await completeUploadAndRequestProcessing(session);
 
         return NextResponse.json({
           ...sessionPayload(session),
           parts: [],
           uploadedBytes: session.fileSize,
           completed: true,
+          processingJobId: processing.jobId,
+          publicationStatus: processing.eventStatus,
+          submissionStatus: processing.submissionStatus,
         });
       }
 
@@ -313,7 +319,8 @@ export async function POST(request: Request) {
 
     if (body.action === "complete") {
       if (session.status === "completed") {
-        await registerCompletedUpload(session);
+        const processing =
+          await completeUploadAndRequestProcessing(session);
 
         return NextResponse.json({
           success: true,
@@ -322,6 +329,9 @@ export async function POST(request: Request) {
           key: session.objectKey,
           size: session.fileSize,
           alreadyCompleted: true,
+          processingJobId: processing.jobId,
+          publicationStatus: processing.eventStatus,
+          submissionStatus: processing.submissionStatus,
         });
       }
 
@@ -336,6 +346,60 @@ export async function POST(request: Request) {
         );
       }
 
+      if (session.status === "completing") {
+        try {
+          const object = await client.send(
+            new HeadObjectCommand({
+              Bucket: bucket,
+              Key: session.objectKey,
+            })
+          );
+
+          if (object.ContentLength !== session.fileSize) {
+            await markSessionFailed(session.id);
+
+            return NextResponse.json(
+              { error: "Completed object size mismatch" },
+              { status: 409 }
+            );
+          }
+
+          const processing =
+            await completeUploadAndRequestProcessing(session);
+
+          return NextResponse.json({
+            success: true,
+            sessionId: session.id,
+            videoId: session.videoId,
+            key: session.objectKey,
+            size: object.ContentLength,
+            alreadyCompleted: true,
+            processingJobId: processing.jobId,
+            publicationStatus: processing.eventStatus,
+            submissionStatus: processing.submissionStatus,
+          });
+        } catch (error) {
+          const name =
+            error &&
+            typeof error === "object" &&
+            "name" in error
+              ? String(error.name)
+              : "";
+
+          if (/NoSuchKey|NotFound/i.test(name)) {
+            return NextResponse.json(
+              {
+                error:
+                  "Upload completion is already in progress",
+              },
+              { status: 409 }
+            );
+          }
+
+          throw error;
+        }
+      }
+
       const claimed = await db
         .update(uploadSessions)
         .set({
@@ -348,7 +412,6 @@ export async function POST(request: Request) {
             inArray(uploadSessions.status, [
               "initiated",
               "uploading",
-              "completing",
             ])
           )
         )
@@ -362,6 +425,9 @@ export async function POST(request: Request) {
           .limit(1);
 
         if (latest?.status === "completed") {
+          const processing =
+            await completeUploadAndRequestProcessing(latest);
+
           return NextResponse.json({
             success: true,
             sessionId: latest.id,
@@ -369,7 +435,17 @@ export async function POST(request: Request) {
             key: latest.objectKey,
             size: latest.fileSize,
             alreadyCompleted: true,
+            processingJobId: processing.jobId,
+            publicationStatus: processing.eventStatus,
+            submissionStatus: processing.submissionStatus,
           });
+        }
+
+        if (latest?.status === "completing") {
+          return NextResponse.json(
+            { error: "Upload completion is already in progress" },
+            { status: 409 }
+          );
         }
 
         return NextResponse.json(
@@ -428,7 +504,8 @@ export async function POST(request: Request) {
           throw new Error("Completed object size mismatch");
         }
 
-        await registerCompletedUpload(session);
+        const processing =
+          await completeUploadAndRequestProcessing(session);
 
         return NextResponse.json({
           success: true,
@@ -436,40 +513,70 @@ export async function POST(request: Request) {
           videoId: session.videoId,
           key: session.objectKey,
           size: object.ContentLength,
+          processingJobId: processing.jobId,
+          publicationStatus: processing.eventStatus,
+          submissionStatus: processing.submissionStatus,
         });
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "";
+        try {
+          const object = await client.send(
+            new HeadObjectCommand({
+              Bucket: bucket,
+              Key: session.objectKey,
+            })
+          );
 
-        // Idempotent completion: object already finalized.
-        if (/NoSuchUpload|already completed|not found/i.test(message)) {
-          try {
-            const object = await client.send(
-              new HeadObjectCommand({
-                Bucket: bucket,
-                Key: session.objectKey,
-              })
-            );
-
-            if (object.ContentLength === session.fileSize) {
-              await registerCompletedUpload(session);
-
-              return NextResponse.json({
-                success: true,
-                sessionId: session.id,
-                videoId: session.videoId,
-                key: session.objectKey,
-                size: object.ContentLength,
-                alreadyCompleted: true,
-              });
-            }
-          } catch {
-            // Fall through to failure handling.
+          if (object.ContentLength !== session.fileSize) {
+            await markSessionFailed(session.id);
+            throw new Error("Completed object size mismatch");
           }
-        }
 
-        await markSessionFailed(session.id);
-        throw error;
+          // R2 may have accepted completion before a network or
+          // database acknowledgement failed. Reconcile from the
+          // verified object without repeating the remote operation.
+          const processing =
+            await completeUploadAndRequestProcessing(session);
+
+          return NextResponse.json({
+            success: true,
+            sessionId: session.id,
+            videoId: session.videoId,
+            key: session.objectKey,
+            size: object.ContentLength,
+            alreadyCompleted: true,
+            processingJobId: processing.jobId,
+            publicationStatus: processing.eventStatus,
+            submissionStatus: processing.submissionStatus,
+          });
+        } catch (reconciliationError) {
+          const originalMessage =
+            error instanceof Error ? error.message : "";
+          const reconciliationName =
+            reconciliationError &&
+            typeof reconciliationError === "object" &&
+            "name" in reconciliationError
+              ? String(reconciliationError.name)
+              : "";
+
+          if (
+            /NoSuchUpload/i.test(originalMessage) &&
+            /NoSuchKey|NotFound/i.test(reconciliationName)
+          ) {
+            await markSessionFailed(session.id);
+          } else if (
+            /NoSuchKey|NotFound/i.test(reconciliationName)
+          ) {
+            await touchSession(session.id, "uploading");
+          }
+
+          if (
+            !/NoSuchKey|NotFound/i.test(reconciliationName)
+          ) {
+            throw reconciliationError;
+          }
+
+          throw error;
+        }
       }
     }
 

@@ -11,3 +11,7 @@ if (!connectionString) {
 const client = postgres(connectionString);
 
 export const db = drizzle(client);
+
+export async function closeDatabase() {
+  await client.end();
+}

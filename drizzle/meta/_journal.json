@@ -36,6 +36,13 @@
       "when": 1794892533742,
       "tag": "0004_r2_processing_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794977550007,
+      "tag": "0005_transactional_outbox",
+      "breakpoints": true
     }
   ]
 }

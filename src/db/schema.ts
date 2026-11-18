@@ -9,6 +9,7 @@ import {
   integer,
   bigint,
   doublePrecision,
+  jsonb,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -31,6 +32,15 @@ export const uploadSessionStatus = pgEnum("upload_session_status", [
   "failed",
   "aborted",
 ]);
+
+export const outboxEventType = pgEnum("outbox_event_type", [
+  "video_processing_requested",
+]);
+
+export const outboxDeliveryStatus = pgEnum(
+  "outbox_delivery_status",
+  ["pending", "claimed", "published"]
+);
 
 // USERS
 export const users = pgTable("users", {
@@ -187,6 +197,10 @@ export const uploadSessions = pgTable(
       .notNull(),
 
     completedAt: timestamp("completed_at"),
+
+    processingJobId: uuid("processing_job_id").references(
+      () => processingJobs.id
+    ),
   },
   (table) => [
     uniqueIndex("upload_sessions_resume_token_uidx").on(
@@ -195,6 +209,75 @@ export const uploadSessions = pgTable(
     uniqueIndex("upload_sessions_video_id_uidx").on(
       table.videoId
     ),
+    uniqueIndex("upload_sessions_processing_job_id_uidx")
+      .on(table.processingJobId)
+      .where(sql`${table.processingJobId} is not null`),
     index("upload_sessions_status_idx").on(table.status),
+  ]
+);
+
+export type VideoProcessingRequestedPayload = {
+  videoId: string;
+  jobId: string;
+};
+
+export const processingOutbox = pgTable(
+  "processing_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    eventType: outboxEventType("event_type")
+      .default("video_processing_requested")
+      .notNull(),
+
+    processingJobId: uuid("processing_job_id")
+      .notNull()
+      .references(() => processingJobs.id),
+
+    payload: jsonb("payload")
+      .$type<VideoProcessingRequestedPayload>()
+      .notNull(),
+
+    status: outboxDeliveryStatus("status")
+      .default("pending")
+      .notNull(),
+
+    attemptCount: integer("attempt_count")
+      .default(0)
+      .notNull(),
+
+    nextAttemptAt: timestamp("next_attempt_at")
+      .defaultNow()
+      .notNull(),
+
+    lastError: text("last_error"),
+
+    claimedBy: varchar("claimed_by", {
+      length: 255,
+    }),
+
+    claimedAt: timestamp("claimed_at"),
+
+    claimExpiresAt: timestamp("claim_expires_at"),
+
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
+
+    publishedAt: timestamp("published_at"),
+  },
+  (table) => [
+    uniqueIndex("processing_outbox_job_uidx").on(
+      table.processingJobId
+    ),
+    index("processing_outbox_pending_idx").on(
+      table.status,
+      table.nextAttemptAt,
+      table.createdAt
+    ),
+    index("processing_outbox_claim_expiry_idx").on(
+      table.status,
+      table.claimExpiresAt
+    ),
   ]
 );

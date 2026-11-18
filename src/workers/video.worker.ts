@@ -1,7 +1,12 @@
 import "dotenv/config";
 
 import { UnrecoverableError, Worker } from "bullmq";
-import { and, eq, notInArray } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  notInArray,
+} from "drizzle-orm";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { generateHighlights } from "../ai/highlights/generate";
@@ -23,7 +28,10 @@ import {
   uploadFileToR2,
   validateR2ObjectKey,
 } from "../lib/storage/r2";
-import { QUEUE_NAME } from "../lib/video-queue";
+import {
+  getWorkerRedisConnection,
+  QUEUE_NAME,
+} from "../lib/video-queue";
 import { extractAudio } from "../media/audio";
 import { getVideoMetadata } from "../media/video";
 
@@ -139,23 +147,72 @@ const worker = new Worker<VideoJob>(
   QUEUE_NAME,
   async (job) => {
     const { videoId, jobId } = job.data;
+    const [storedJob] = await db
+      .select({ status: processingJobs.status })
+      .from(processingJobs)
+      .where(eq(processingJobs.id, jobId))
+      .limit(1);
+
+    if (!storedJob) {
+      throw new UnrecoverableError(
+        "Processing job does not exist"
+      );
+    }
+
+    if (
+      storedJob.status === "completed" ||
+      storedJob.status === "failed"
+    ) {
+      console.log(
+        JSON.stringify({
+          event: "worker.duplicate_skipped",
+          processingJobId: jobId,
+          videoId,
+          status: storedJob.status,
+        })
+      );
+
+      return {
+        videoId,
+        jobId,
+        skipped: true,
+        status: storedJob.status,
+      };
+    }
+
     const workspace = await createProcessingWorkspace();
 
     try {
-      await Promise.all([
-        db
-          .update(processingJobs)
-          .set({
-            status: "processing",
-            errorMessage: null,
-            completedAt: null,
-          })
-          .where(eq(processingJobs.id, jobId)),
-        db
-          .update(videos)
-          .set({ status: "processing" })
-          .where(eq(videos.id, videoId)),
-      ]);
+      const [claimedJob] = await db
+        .update(processingJobs)
+        .set({
+          status: "processing",
+          errorMessage: null,
+          completedAt: null,
+        })
+        .where(
+          and(
+            eq(processingJobs.id, jobId),
+            inArray(processingJobs.status, [
+              "pending",
+              "processing",
+            ])
+          )
+        )
+        .returning({ id: processingJobs.id });
+
+      if (!claimedJob) {
+        return {
+          videoId,
+          jobId,
+          skipped: true,
+        };
+      }
+
+      await db
+        .update(videos)
+        .set({ status: "processing" })
+        .where(eq(videos.id, videoId));
 
       const [video] = await db
         .select()
@@ -351,11 +408,7 @@ const worker = new Worker<VideoJob>(
     }
   },
   {
-    connection: {
-      host: "localhost",
-      port: 6379,
-      maxRetriesPerRequest: null,
-    },
+    connection: getWorkerRedisConnection(),
     concurrency: 1,
   }
 );

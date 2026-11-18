@@ -1,6 +1,9 @@
 
 import { db } from "@/db";
-import { processingJobs } from "@/db/schema";
+import {
+  processingJobs,
+  processingOutbox,
+} from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
@@ -9,6 +12,13 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (process.env.NODE_ENV !== "development") {
+    return Response.json(
+      { error: "Unavailable" },
+      { status: 403 }
+    );
+  }
+
   const { id } = await params;
 
   if (
@@ -22,8 +32,23 @@ export async function GET(
 
   try {
     const [job] = await db
-      .select()
+      .select({
+        id: processingJobs.id,
+        videoId: processingJobs.videoId,
+        status: processingJobs.status,
+        errorMessage: processingJobs.errorMessage,
+        createdAt: processingJobs.createdAt,
+        completedAt: processingJobs.completedAt,
+        publicationStatus: processingOutbox.status,
+      })
       .from(processingJobs)
+      .leftJoin(
+        processingOutbox,
+        eq(
+          processingOutbox.processingJobId,
+          processingJobs.id
+        )
+      )
       .where(eq(processingJobs.id, id))
       .limit(1);
 
@@ -34,7 +59,17 @@ export async function GET(
       );
     }
 
-    return Response.json(job);
+    const submissionStatus =
+      job.status === "pending"
+        ? job.publicationStatus === "published"
+          ? "queued"
+          : "awaiting_publication"
+        : job.status;
+
+    return Response.json({
+      ...job,
+      submissionStatus,
+    });
   } catch (error) {
     console.error(error);
 

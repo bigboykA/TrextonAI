@@ -9,6 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
     "worker": "node --env-file=.env.local --import tsx src/workers/video.worker.ts",
+    "dispatcher": "node --env-file=.env.local --import tsx src/outbox/dispatcher.ts",
+    "outbox:status": "node --env-file=.env.local --import tsx src/outbox/status.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
