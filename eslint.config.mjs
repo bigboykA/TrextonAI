@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Project-local Agent Skills are third-party tooling, not app source.
     ".agents/**",
+    // The Python media environment contains vendored JavaScript assets.
+    ".venv/**",
   ]),
 ]);
 

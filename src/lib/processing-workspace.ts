@@ -9,6 +9,7 @@ export type ProcessingWorkspace = {
   root: string;
   sourcePath: string;
   audioPath: string;
+  audioFeaturesPath: string;
   transcriptPath: string;
   clipsDir: string;
 };
@@ -26,6 +27,7 @@ Promise<ProcessingWorkspace> {
     root,
     sourcePath: path.join(root, "source.mp4"),
     audioPath: path.join(root, "audio.wav"),
+    audioFeaturesPath: path.join(root, "audio-features.json"),
     transcriptPath: path.join(root, "transcript.json"),
     clipsDir,
   };

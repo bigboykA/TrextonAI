@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { analyzeAudio } from "../ai/audio";
 import { generateHighlights } from "../ai/highlights/generate";
 import { transcribeAudio } from "../ai/transcribe";
 import { db } from "../db";
@@ -41,6 +42,9 @@ type VideoJob = {
 };
 
 class PermanentProcessingError extends Error {}
+
+const AUDIO_ANALYSIS_ENABLED =
+  process.env.ENABLE_AUDIO_FEATURE_ANALYSIS === "true";
 
 function permanent(message: string): never {
   throw new PermanentProcessingError(message);
@@ -244,6 +248,24 @@ const worker = new Worker<VideoJob>(
         workspace.sourcePath,
         workspace.audioPath
       );
+
+      if (AUDIO_ANALYSIS_ENABLED) {
+        const audioFeatures = await analyzeAudio(
+          workspace.audioPath,
+          workspace.audioFeaturesPath
+        );
+
+        console.log(
+          JSON.stringify({
+            event: "worker.audio_analysis.completed",
+            processingJobId: jobId,
+            videoId,
+            windows: audioFeatures.features.length,
+            duration: audioFeatures.duration,
+          })
+        );
+      }
+
       await transcribeAudio(
         workspace.audioPath,
         workspace.transcriptPath

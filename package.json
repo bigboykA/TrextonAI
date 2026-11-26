@@ -11,6 +11,9 @@
     "worker": "node --env-file=.env.local --import tsx src/workers/video.worker.ts",
     "dispatcher": "node --env-file=.env.local --import tsx src/outbox/dispatcher.ts",
     "outbox:status": "node --env-file=.env.local --import tsx src/outbox/status.ts",
+    "audio:analyze": ".venv/bin/python src/ai/audio/analyzer.py",
+    "audio:visualize": ".venv/bin/python src/ai/audio/visualize.py",
+    "audio:test": ".venv/bin/python -m unittest discover -s src/ai/audio/tests -p 'test_*.py'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
