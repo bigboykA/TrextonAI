@@ -5,9 +5,11 @@ import { ClipCard } from "./clip-card";
 export function ClipGrid({
   clips,
   view = "grid",
+  sourceTitle,
 }: {
   clips: GeneratedClip[];
   view?: "grid" | "list";
+  sourceTitle?: string;
 }) {
   return (
     <FocusCards
@@ -18,7 +20,13 @@ export function ClipGrid({
       }
       items={clips.map((clip) => ({
         id: clip.id,
-        content: <ClipCard clip={clip} view={view} />,
+        content: (
+          <ClipCard
+            clip={clip}
+            view={view}
+            sourceTitle={sourceTitle}
+          />
+        ),
       }))}
     />
   );

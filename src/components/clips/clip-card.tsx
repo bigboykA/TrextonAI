@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   Download,
+  Film,
   Play,
   Timer,
 } from "lucide-react";
@@ -19,9 +20,11 @@ import {
 export function ClipCard({
   clip,
   view = "grid",
+  sourceTitle,
 }: {
   clip: GeneratedClip;
   view?: "grid" | "list";
+  sourceTitle?: string;
 }) {
   const videoUrl = `/api/clips/${clip.id}/video`;
   const duration = clip.end - clip.start;
@@ -100,11 +103,17 @@ export function ClipCard({
           </p>
         ) : null}
 
-        <div className="mt-auto flex items-center gap-3 pt-3 text-xs text-muted-foreground">
+        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-3 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Timer aria-hidden="true" className="size-3" />
             {formatDuration(duration)}
           </span>
+          {sourceTitle ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <Film aria-hidden="true" className="size-3 shrink-0" />
+              <span className="max-w-40 truncate">{sourceTitle}</span>
+            </span>
+          ) : null}
           <span>{formatRelativeDate(clip.createdAt)}</span>
         </div>
       </div>

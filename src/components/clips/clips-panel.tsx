@@ -41,18 +41,23 @@ export function ClipsPanel({
   limit,
   showHeader = true,
   processingStatus,
+  sourceTitle,
+  videoId,
 }: {
   limit?: number;
   showHeader?: boolean;
   processingStatus?: SubmissionStatus;
+  sourceTitle?: string;
+  videoId?: string;
 }) {
   const {
     activeVideoId,
     librarySearch,
     setLibrarySearch,
   } = useWorkspace();
+  const resolvedVideoId = videoId ?? activeVideoId;
   const { clips, isLoading, error, refresh } =
-    useClips(activeVideoId);
+    useClips(resolvedVideoId);
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("newest");
   const [view, setView] = useState<"grid" | "list">("grid");
@@ -98,7 +103,7 @@ export function ClipsPanel({
 
   const hasFilterTabs =
     showControls &&
-    Boolean(activeVideoId) &&
+    Boolean(resolvedVideoId) &&
     !isLoading &&
     !error &&
     clips.length > 0;
@@ -121,7 +126,7 @@ export function ClipsPanel({
               Ready for review
             </p>
           </div>
-          {activeVideoId ? (
+          {resolvedVideoId ? (
             <button
               type="button"
               onClick={refresh}
@@ -142,7 +147,7 @@ export function ClipsPanel({
         </div>
       ) : null}
 
-      {showControls && activeVideoId && !isLoading && !error && clips.length ? (
+      {showControls && resolvedVideoId && !isLoading && !error && clips.length ? (
         <div className="mb-4 space-y-3 border-b border-border pb-4">
           <div className="relative md:hidden">
             <Search
@@ -224,7 +229,7 @@ export function ClipsPanel({
           hasFilterTabs ? `clip-duration-filter-${filter}` : undefined
         }
       >
-        {!activeVideoId ? (
+        {!resolvedVideoId ? (
           <EmptyState
             icon={Film}
             title="Choose a video source"
@@ -289,7 +294,11 @@ export function ClipsPanel({
             }
           />
         ) : (
-          <ClipGrid clips={visibleClips} view={view} />
+          <ClipGrid
+            clips={visibleClips}
+            view={view}
+            sourceTitle={sourceTitle}
+          />
         )}
       </div>
     </section>

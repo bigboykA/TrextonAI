@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
-  CircleCheck,
-  CircleDashed,
-  CircleX,
   Film,
-  LoaderCircle,
   Plus,
   TriangleAlert,
 } from "lucide-react";
@@ -14,75 +10,21 @@ import { ClipsPanel } from "@/components/clips/clips-panel";
 import { useUploadManager } from "@/components/providers/upload-provider";
 import { useWorkspace } from "@/components/providers/workspace-provider";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tabs } from "@/components/ui/tabs";
+import { RecordingStatus } from "@/components/videos/recording-status";
 import { useRecordings } from "@/hooks/use-recordings";
-import { formatFileSize, formatRelativeDate } from "@/lib/format";
-import type { SubmissionStatus } from "@/lib/frontend-types";
+import {
+  formatDuration,
+  formatFileSize,
+  formatRelativeDate,
+} from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-function RecordingStatus({
-  status,
+export function LibraryView({
+  initialSection = "recordings",
 }: {
-  status: SubmissionStatus | "unprocessed";
+  initialSection?: "recordings" | "highlights";
 }) {
-  const details =
-    status === "completed"
-      ? {
-          label: "Ready",
-          icon: CircleCheck,
-          className: "text-success",
-        }
-      : status === "failed"
-        ? {
-            label: "Failed",
-            icon: CircleX,
-            className: "text-destructive",
-          }
-        : status === "processing"
-          ? {
-              label: "Processing",
-              icon: LoaderCircle,
-              className: "text-primary",
-            }
-          : status === "queued"
-            ? {
-                label: "Queued",
-                icon: CircleDashed,
-                className: "text-primary",
-              }
-            : status === "awaiting_publication" || status === "pending"
-              ? {
-                  label: "Waiting",
-                  icon: CircleDashed,
-                  className: "text-muted-foreground",
-                }
-              : {
-                  label: "Not processed",
-                  icon: CircleDashed,
-                  className: "text-muted-foreground",
-                };
-  const Icon = details.icon;
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 text-[11px] font-medium",
-        details.className
-      )}
-    >
-      <Icon
-        aria-hidden="true"
-        className={cn(
-          "size-3.5",
-          status === "processing" &&
-            "animate-spin motion-reduce:animate-none"
-        )}
-      />
-      {details.label}
-    </span>
-  );
-}
-
-export function LibraryView() {
   const { recordings, isLoading, error, refresh } = useRecordings();
   const {
     activeVideoId,
@@ -90,6 +32,9 @@ export function LibraryView() {
     setActiveJobId,
   } = useWorkspace();
   const { openDialog } = useUploadManager();
+  const [librarySection, setLibrarySection] = useState<
+    "recordings" | "highlights"
+  >(initialSection);
 
   useEffect(() => {
     if (
@@ -172,84 +117,158 @@ export function LibraryView() {
         </div>
       ) : (
         <>
-          <section aria-labelledby="recordings-heading">
-            <div className="mb-3 flex items-center justify-between gap-4">
-              <div>
-                <h2
-                  id="recordings-heading"
-                  className="text-sm font-semibold"
-                >
-                  Recordings
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <Tabs
+              value={librarySection}
+              onValueChange={(value) =>
+                setLibrarySection(
+                  value as "recordings" | "highlights"
+                )
+              }
+              tabs={[
+                { title: "Recordings", value: "recordings" },
+                { title: "Highlights", value: "highlights" },
+              ]}
+              ariaLabel="Library content"
+              idBase="library-section"
+              panelId="library-section-panel"
+              containerClassName="self-start"
+            />
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="h-11 self-start rounded-lg px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:h-8"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {librarySection === "recordings" ? (
+            <section
+              id="library-section-panel"
+              role="tabpanel"
+              aria-labelledby="library-section-recordings"
+              className="mt-5"
+            >
+              <div className="mb-3">
+                <h2 className="text-sm font-semibold">
+                  Original recordings
                 </h2>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Select a source to view its highlights
+                  Choose a recording to open its generated highlights.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => void refresh()}
-                className="h-11 rounded-lg px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30 sm:h-8"
-              >
-                Refresh
-              </button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {recordings.map((recording) => {
-                const isSelected =
-                  recording.id === selectedRecording?.id;
-                const status =
-                  recording.latestJob?.submissionStatus ??
-                  recording.latestJob?.status ??
-                  "unprocessed";
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {recordings.map((recording) => {
+                  const isSelected =
+                    recording.id === selectedRecording?.id;
+                  const status =
+                    recording.latestJob?.submissionStatus ??
+                    recording.latestJob?.status ??
+                    "unprocessed";
 
-                return (
-                  <button
-                    key={recording.id}
-                    type="button"
-                    aria-pressed={isSelected}
-                    onClick={() => {
+                  return (
+                    <button
+                      key={recording.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      aria-label={`View highlights for ${
+                        recording.title || "untitled recording"
+                      }`}
+                      onClick={() => {
+                        setActiveVideoId(recording.id);
+                        setActiveJobId(recording.latestJob?.id ?? "");
+                        setLibrarySection("highlights");
+                      }}
+                      className={cn(
+                        "rounded-2xl border bg-card p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
+                        isSelected
+                          ? "border-primary/45 bg-primary/[0.035]"
+                          : "border-border hover:border-primary/25"
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                          <Film aria-hidden="true" className="size-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold">
+                            {recording.title || "Untitled recording"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {formatRelativeDate(recording.createdAt)}
+                            {recording.sourceSizeBytes
+                              ? ` · ${formatFileSize(recording.sourceSizeBytes)}`
+                              : ""}
+                            {recording.duration &&
+                            Number.isFinite(Number(recording.duration))
+                              ? ` · ${formatDuration(Number(recording.duration))}`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+                        <RecordingStatus status={status} />
+                        <span className="text-[11px] text-muted-foreground">
+                          {recording.clipCount}{" "}
+                          {recording.clipCount === 1
+                            ? "highlight"
+                            : "highlights"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section
+              id="library-section-panel"
+              role="tabpanel"
+              aria-labelledby="library-section-highlights"
+              className="mt-5"
+            >
+              <div className="mb-5 flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold">
+                    Highlight source
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Generated clips stay associated with their original
+                    recording.
+                  </p>
+                </div>
+                <label className="sm:min-w-64">
+                  <span className="sr-only">Highlight source recording</span>
+                  <select
+                    value={selectedRecording?.id ?? ""}
+                    onChange={(event) => {
+                      const recording = recordings.find(
+                        (item) => item.id === event.target.value
+                      );
+                      if (!recording) return;
                       setActiveVideoId(recording.id);
                       setActiveJobId(recording.latestJob?.id ?? "");
                     }}
-                    className={cn(
-                      "rounded-2xl border bg-card p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/30",
-                      isSelected
-                        ? "border-primary/45 bg-primary/[0.035]"
-                        : "border-border hover:border-primary/25"
-                    )}
+                    className="h-11 w-full rounded-lg border border-border bg-background px-3 text-xs outline-none focus:ring-3 focus:ring-ring/20 sm:h-9"
                   >
-                    <div className="flex items-start gap-3">
-                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                        <Film aria-hidden="true" className="size-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">
-                          {recording.title || "Untitled recording"}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {formatRelativeDate(recording.createdAt)}
-                          {recording.sourceSizeBytes
-                            ? ` · ${formatFileSize(recording.sourceSizeBytes)}`
-                            : ""}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-                      <RecordingStatus status={status} />
-                      <span className="text-[11px] text-muted-foreground">
-                        {recording.clipCount}{" "}
-                        {recording.clipCount === 1 ? "highlight" : "highlights"}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="border-t border-border pt-6">
-            <ClipsPanel processingStatus={selectedStatus} />
-          </section>
+                    {recordings.map((recording) => (
+                      <option key={recording.id} value={recording.id}>
+                        {recording.title || "Untitled recording"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <ClipsPanel
+                processingStatus={selectedStatus}
+                sourceTitle={
+                  selectedRecording?.title || "Untitled recording"
+                }
+                videoId={selectedRecording?.id}
+              />
+            </section>
+          )}
         </>
       )}
     </div>
