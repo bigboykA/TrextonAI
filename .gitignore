@@ -50,5 +50,9 @@ next-env.d.ts
 
 
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 .agents/
 skills-lock.json
